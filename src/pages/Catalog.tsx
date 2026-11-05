@@ -63,7 +63,7 @@ function CustomerSheet({
       </div>
       {initial && (
         <div className="hint" style={{ margin: '0 2px' }}>
-          名下 {usedBy} 个品。品项在下面按客户分组，装车时选的就是这里的客户。
+          名下 {usedBy} 个品。品项在下面按客户分组，装车时选的「收货方」就是这里。
         </div>
       )}
       <div className="sheet-actions">
@@ -186,7 +186,7 @@ export default function Catalog() {
 
         <div className="hint">
           箱规照外箱稿上的「长*宽*高（外径）」填，单位毫米。填得越准，3D 装箱图和装车数越靠谱。
-          客户可以随时加，装车第一步选的就是这里列出来的客户。
+          客户可以随时加，装车时填的「收货方」就是这里列出来的这些。
         </div>
       </main>
 

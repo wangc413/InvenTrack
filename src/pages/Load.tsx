@@ -52,17 +52,17 @@ function NewOrderSheet({
 
   return (
     <Sheet open={open} title="新建车次" onClose={onClose}>
-      <label className="field-label">送到哪</label>
+      <label className="field-label">收货地</label>
       <input
         className="input"
         value={destination}
         onChange={(e) => setDestination(e.target.value)}
-        placeholder="门店名或收货地址"
+        placeholder="门店名或详细地址"
         autoFocus
       />
 
       <label className="field-label" style={{ marginTop: 18 }}>
-        送给谁
+        收货方
       </label>
       <div className="chips">
         {db.customers.map((c) => (
@@ -152,7 +152,7 @@ function PalletSheet({
                 </button>
               )
             })}
-            {skus.length === 0 && <div className="hint">这个客户还没有建档的品项，先去「档案」加一个</div>}
+            {skus.length === 0 && <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>}
           </div>
         </>
       )}
@@ -343,9 +343,9 @@ export default function Load() {
               </div>
               <div className="es-title">今天要发哪一车？</div>
               <div className="es-body">
-                填收货地、选客户，然后一块板一块板往里装
+                填收货地、选收货方，一块板一块板装
                 <br />
-                每块板只放一种商品、一个生产日期
+                每板一种商品、一个生产日期
               </div>
               <button className="btn primary" onClick={() => setCreating(true)}>
                 新建车次

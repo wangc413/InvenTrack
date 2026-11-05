@@ -983,6 +983,7 @@ textarea.input {
   color: var(--sub);
   line-height: 1.65;
   margin-bottom: 20px;
+  text-wrap: pretty;
 }
 
 /* ---------- 批次行 / 流水行 ---------- */

@@ -53,7 +53,7 @@ export default function Me() {
 
   const exportCsv = () => {
     const rows: string[][] = [
-      ['发货单号', '日期', '收货地', '客户', '拖板号', '品名', '规格', '生产日期', '箱数', '件数', '体积m3', '重量kg'],
+      ['发货单号', '日期', '收货地', '收货方', '拖板号', '品名', '规格', '生产日期', '箱数', '件数', '体积m3', '重量kg'],
     ]
     for (const o of db.orders) {
       const customer = db.customers.find((c) => c.id === o.customerId)
