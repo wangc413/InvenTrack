@@ -25,16 +25,26 @@ export default function Scanner({ onResult, onClose, count = 0 }: Props) {
     const start = async () => {
       if (!videoRef.current) return
       try {
-        const controls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
-          if (!result || stopped) return
-          const text = result.getText()
-          const now = Date.now()
-          if (text === lastText && now - last < 1500) return
-          last = now
-          lastText = text
-          navigator.vibrate?.(35)
-          resultRef.current(text)
-        })
+        const controls = await reader.decodeFromConstraints(
+          {
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          },
+          videoRef.current,
+          (result) => {
+            if (!result || stopped) return
+            const text = result.getText()
+            const now = Date.now()
+            if (text === lastText && now - last < 1500) return
+            last = now
+            lastText = text
+            navigator.vibrate?.(35)
+            resultRef.current(text)
+          },
+        )
         stopRef.current = () => {
           stopped = true
           controls.stop()

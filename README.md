@@ -1,32 +1,102 @@
-# React + TypeScript + Vite
+# 发货助手
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+仓库发货用的手机端工具。扫码计件、自动换箱、扣库存、生成发货单、估算装车方案。
 
-Currently, two official plugins are available:
+纯网页应用（PWA），不装 App、不进应用商店。手机浏览器打开即用，可添加到主屏幕。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 能做什么
 
-## React Compiler
+- **扫码计件**：连扫模式，扫一件加一件，可切换「按件扫 / 按箱扫」
+- **自动换箱**：按每箱件数算出整箱数 + 尾箱件数
+- **批次库存**：按批次入库，发货时先进先出自动扣减
+- **发货单**：单号自动生成，可导出 CSV（Excel 直接打开）
+- **装车方案**：按箱规和车厢尺寸算体积/重量利用率、要不要分车、第一层怎么铺
+- **未建档条码**：扫到没建过档的码，当场补一个品项就能继续
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 本地运行
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+浏览器打开终端里提示的地址（通常是 http://localhost:5173）。
+
+> 电脑上想测扫码，手机和电脑连同一个 WiFi，用 `npm run dev -- --host` 启动，
+> 手机访问电脑的局域网地址即可。注意：局域网 http 地址下浏览器会禁用摄像头，
+> 扫码功能要部署到 https 才能正常用。
+
+## 部署到 GitHub Pages（获取一个固定网址）
+
+### 1. 在 GitHub 上新建仓库
+
+打开 https://github.com/new ，仓库名随便填（例如 `ship-helper`），
+**必须选 Public**，不要勾选任何初始化文件，点 Create repository。
+
+### 2. 把代码推上去
+
+在本目录下执行（把 `你的用户名` 和 `ship-helper` 换成你的）：
+
+```bash
+git branch -M main
+git remote add origin https://github.com/你的用户名/ship-helper.git
+git push -u origin main
+```
+
+### 3. 打开 Pages
+
+仓库页 → **Settings** → 左侧 **Pages** → 找到 **Build and deployment**，
+把 **Source** 改成 **GitHub Actions**。
+
+### 4. 等自动构建
+
+仓库页 → **Actions** 标签，会看到 `Deploy to GitHub Pages` 正在跑，等它变绿（约 1 分钟）。
+
+### 5. 拿到网址
+
+地址是：
+
+```
+https://你的用户名.github.io/ship-helper/
+```
+
+这个地址**永久不变**。以后改了功能，只要 push 一次，刷新就是新版，网址和二维码都不用换。
+
+### 6. 生成二维码
+
+用任意在线二维码工具把这个网址转成二维码，打印出来贴在仓库门口和工位上。
+
+或者直接打开 App 的「我的」页面，里面已经生成好了，截图保存即可。
+
+## 手机上用起来像 App
+
+- **安卓 Chrome**：打开网址 → 右上角菜单 → 添加到主屏幕
+- **iPhone Safari**：打开网址 → 底部分享按钮 → 添加到主屏幕
+
+添加后从桌面图标进入，是全屏的，没有浏览器地址栏。
+
+## 数据说明
+
+**数据存在你自己的手机浏览器里（localStorage），不会上传到任何服务器。**
+
+这意味着：
+
+- 你和同事各自扫码打开，是各自独立的一份数据，互相看不到
+- 换手机、清缓存、换浏览器都会读不到旧数据
+- 重要数据请定期在「我的 → 导出备份」存一份 JSON
+
+需要多人实时共享同一份库存时，要额外接一个后端（云数据库），
+这一版没有接，因为要先跑通流程再决定要不要那份额外的成本。
+
+## 常见问题
+
+**扫码没反应？**
+确认是 https 网址（GitHub Pages 是 https，没问题），并在浏览器里允许了相机权限。
+不行就用手动输入条码。
+
+**装车算得准吗？**
+按「同类箱规整层堆码」估算，不考虑混装插空和重心。超重优先于超体积，最终以现场为准。
+箱规量得越准，结果越靠谱。
+
+**能改箱子数量吗？**
+在「档案」里改某个品项的「每箱件数」，换算和装车会跟着变。
