@@ -18,7 +18,7 @@ function gridOf(truck: Truck, l: number, w: number) {
 
 export default function Load() {
   const db = useDB()
-  const orders = db.orders.filter((o) => o.lines.length > 0)
+  const orders = db.orders.filter((o) => o.pallets.some((p) => p.items.length > 0))
   const [pickedId, setPickedId] = useState('')
   const [editing, setEditing] = useState(false)
 

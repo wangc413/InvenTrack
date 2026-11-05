@@ -23,7 +23,16 @@ export type Batch = {
   createdAt: number
 }
 
-export type OrderLine = { skuId: string; qty: number }
+/** 一个拖板上某品项放了几箱 */
+export type PalletItem = { skuId: string; boxes: number }
+
+/** 一块拖板 */
+export type Pallet = {
+  id: string
+  no: string
+  items: PalletItem[]
+  createdAt: number
+}
 
 export type Order = {
   id: string
@@ -32,7 +41,7 @@ export type Order = {
   remark: string
   createdAt: number
   status: 'draft' | 'shipped'
-  lines: OrderLine[]
+  pallets: Pallet[]
 }
 
 export type Truck = {
@@ -78,13 +87,28 @@ function seed(): DB {
   }
 }
 
+function migrate(raw: Record<string, unknown>): DB {
+  const base = seed()
+  const data = raw as Partial<DB>
+  const orders = (data.orders ?? []).map((o) => {
+    const legacy = o as Order & { lines?: { skuId: string; qty: number }[] }
+    const pallets = Array.isArray(legacy.pallets) ? legacy.pallets : []
+    return { ...legacy, pallets } as Order
+  })
+  return {
+    skus: data.skus ?? base.skus,
+    batches: data.batches ?? base.batches,
+    orders,
+    trucks: data.trucks?.length ? data.trucks : base.trucks,
+    seq: data.seq ?? 1,
+  }
+}
+
 function load(): DB {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return seed()
-    const parsed = JSON.parse(raw) as DB
-    if (!parsed.skus) return seed()
-    return { ...seed(), ...parsed }
+    return migrate(JSON.parse(raw))
   } catch {
     return seed()
   }
@@ -98,7 +122,7 @@ function commit(next: DB) {
   try {
     localStorage.setItem(KEY, JSON.stringify(next))
   } catch {
-    // 存储满时静默失败，界面仍可用
+    // 存储写满时静默失败，界面仍可继续用
   }
   listeners.forEach((fn) => fn())
 }
@@ -114,7 +138,7 @@ export const getState = () => state
 export const useDB = () => useSyncExternalStore(subscribe, getState, getState)
 
 export function replaceAll(next: DB) {
-  commit(next)
+  commit(migrate(next as unknown as Record<string, unknown>))
 }
 
 export function resetAll() {
@@ -161,7 +185,7 @@ export function removeBatch(id: string) {
   commit({ ...state, batches: state.batches.filter((b) => b.id !== id) })
 }
 
-/* ---------- 发货单 ---------- */
+/* ---------- 车次 / 发货单 ---------- */
 
 export function createOrder(customer: string, remark = '') {
   const d = new Date()
@@ -173,7 +197,7 @@ export function createOrder(customer: string, remark = '') {
     remark,
     createdAt: Date.now(),
     status: 'draft',
-    lines: [],
+    pallets: [],
   }
   commit({ ...state, orders: [order, ...state.orders], seq: state.seq + 1 })
   return order.id
@@ -183,58 +207,108 @@ export function updateOrder(id: string, patch: Partial<Order>) {
   commit({ ...state, orders: state.orders.map((o) => (o.id === id ? { ...o, ...patch } : o)) })
 }
 
-export function bumpLine(orderId: string, skuId: string, delta: number) {
-  commit({
-    ...state,
-    orders: state.orders.map((o) => {
-      if (o.id !== orderId) return o
-      const lines = [...o.lines]
-      const i = lines.findIndex((l) => l.skuId === skuId)
-      if (i >= 0) {
-        const qty = lines[i].qty + delta
-        if (qty <= 0) lines.splice(i, 1)
-        else lines[i] = { ...lines[i], qty }
-      } else if (delta > 0) {
-        lines.push({ skuId, qty: delta })
-      }
-      return { ...o, lines }
-    }),
-  })
-}
-
-export function setLineQty(orderId: string, skuId: string, qty: number) {
-  commit({
-    ...state,
-    orders: state.orders.map((o) => {
-      if (o.id !== orderId) return o
-      const lines = o.lines.filter((l) => l.skuId !== skuId)
-      if (qty > 0) lines.push({ skuId, qty })
-      return { ...o, lines }
-    }),
-  })
-}
-
 export function removeOrder(id: string) {
   commit({ ...state, orders: state.orders.filter((o) => o.id !== id) })
 }
 
-/** 确认发货：按先进先出扣减批次库存 */
+/* ---------- 拖板 ---------- */
+
+export function addPallet(orderId: string) {
+  const pallet: Pallet = { id: uid(), no: '', items: [], createdAt: Date.now() }
+  commit({
+    ...state,
+    orders: state.orders.map((o) => {
+      if (o.id !== orderId) return o
+      const nextPallet = { ...pallet, no: `P${o.pallets.length + 1}` }
+      pallet.no = nextPallet.no
+      return { ...o, pallets: [...o.pallets, nextPallet] }
+    }),
+  })
+  return pallet.id
+}
+
+export function removePallet(orderId: string, palletId: string) {
+  commit({
+    ...state,
+    orders: state.orders.map((o) => {
+      if (o.id !== orderId) return o
+      const pallets = o.pallets
+        .filter((p) => p.id !== palletId)
+        .map((p, i) => ({ ...p, no: `P${i + 1}` }))
+      return { ...o, pallets }
+    }),
+  })
+}
+
+/** 设置某个拖板上某品项的箱数，0 表示移除 */
+export function setItemBoxes(orderId: string, palletId: string, skuId: string, boxes: number) {
+  commit({
+    ...state,
+    orders: state.orders.map((o) => {
+      if (o.id !== orderId) return o
+      return {
+        ...o,
+        pallets: o.pallets.map((p) => {
+          if (p.id !== palletId) return p
+          const idx = p.items.findIndex((it) => it.skuId === skuId)
+          let items = p.items
+          if (idx >= 0) {
+            items = boxes > 0
+              ? p.items.map((it, i) => (i === idx ? { ...it, boxes } : it))
+              : p.items.filter((_, i) => i !== idx)
+          } else if (boxes > 0) {
+            items = [...p.items, { skuId, boxes }]
+          }
+          return { ...p, items }
+        }),
+      }
+    }),
+  })
+}
+
+export function movePallet(orderId: string, palletId: string, dir: -1 | 1) {
+  commit({
+    ...state,
+    orders: state.orders.map((o) => {
+      if (o.id !== orderId) return o
+      const idx = o.pallets.findIndex((p) => p.id === palletId)
+      const to = idx + dir
+      if (idx < 0 || to < 0 || to >= o.pallets.length) return o
+      const pallets = [...o.pallets]
+      const [moved] = pallets.splice(idx, 1)
+      pallets.splice(to, 0, moved)
+      return { ...o, pallets: pallets.map((p, i) => ({ ...p, no: `P${i + 1}` })) }
+    }),
+  })
+}
+
+/** 确认发车：按拖板汇总箱数，折成件数后先进先出扣库存 */
 export function shipOrder(id: string) {
   const order = state.orders.find((o) => o.id === id)
   if (!order || order.status === 'shipped') return
   const batches = state.batches.map((b) => ({ ...b }))
-  for (const line of order.lines) {
-    let need = line.qty
-    const pool = batches
-      .filter((b) => b.skuId === line.skuId && b.left > 0)
-      .sort((a, b) => a.createdAt - b.createdAt)
-    for (const b of pool) {
-      if (need <= 0) break
-      const take = Math.min(b.left, need)
-      b.left -= take
-      need -= take
+
+  const need = new Map<string, number>()
+  for (const p of order.pallets) {
+    for (const it of p.items) {
+      need.set(it.skuId, (need.get(it.skuId) ?? 0) + it.boxes)
     }
   }
+
+  for (const [skuId, boxes] of need) {
+    const sku = state.skus.find((s) => s.id === skuId)
+    let remain = boxes * (sku?.perBox || 1)
+    const pool = batches
+      .filter((b) => b.skuId === skuId && b.left > 0)
+      .sort((a, b) => a.createdAt - b.createdAt)
+    for (const b of pool) {
+      if (remain <= 0) break
+      const take = Math.min(b.left, remain)
+      b.left -= take
+      remain -= take
+    }
+  }
+
   commit({
     ...state,
     batches,

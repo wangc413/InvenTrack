@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import Ship from './pages/Ship'
+import Pallets from './pages/Pallets'
 import Stock from './pages/Stock'
 import Catalog from './pages/Catalog'
 import Load from './pages/Load'
@@ -7,7 +7,7 @@ import Me from './pages/Me'
 import { Icon, ToastHost } from './components/UI'
 
 const TABS = [
-  { key: 'ship', label: '发货', icon: 'ship' },
+  { key: 'pallet', label: '装板', icon: 'pallet' },
   { key: 'stock', label: '库存', icon: 'stock' },
   { key: 'catalog', label: '档案', icon: 'catalog' },
   { key: 'load', label: '装车', icon: 'load' },
@@ -17,11 +17,11 @@ const TABS = [
 type TabKey = (typeof TABS)[number]['key']
 
 export default function App() {
-  const [tab, setTab] = useState<TabKey>('ship')
+  const [tab, setTab] = useState<TabKey>('pallet')
 
   return (
     <div className="app">
-      {tab === 'ship' && <Ship />}
+      {tab === 'pallet' && <Pallets />}
       {tab === 'stock' && <Stock />}
       {tab === 'catalog' && <Catalog />}
       {tab === 'load' && <Load />}

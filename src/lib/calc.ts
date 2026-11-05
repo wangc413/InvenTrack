@@ -1,12 +1,11 @@
-import type { DB, Order, Sku, Truck } from './store'
+import type { DB, Order, Pallet, Sku, Truck } from './store'
 
 /** 件数换算箱数 */
 export function boxify(qty: number, perBox: number) {
   const per = perBox > 0 ? perBox : 1
   const full = Math.floor(qty / per)
   const tail = qty % per
-  const total = full + (tail > 0 ? 1 : 0)
-  return { full, tail, total }
+  return { full, tail, total: full + (tail > 0 ? 1 : 0) }
 }
 
 /** 单箱体积，单位 m³ */
@@ -14,42 +13,86 @@ export function boxVolume(sku: Sku) {
   return (sku.boxL * sku.boxW * sku.boxH) / 1_000_000
 }
 
+export type PalletStat = {
+  pallet: Pallet
+  boxes: number
+  qty: number
+  volume: number
+  weight: number
+  /** 铺满拖板图用的箱子序列，每个元素对应一箱，值是品项在调色板里的序号 */
+  segments: { skuId: string; color: number; count: number }[]
+}
+
 export type LineDetail = {
   sku: Sku
-  qty: number
-  full: number
-  tail: number
   boxes: number
+  qty: number
   volume: number
   weight: number
 }
 
 export type OrderSummary = {
+  pallets: PalletStat[]
   lines: LineDetail[]
+  totalPallets: number
   totalQty: number
   totalBoxes: number
   totalVolume: number
   totalWeight: number
 }
 
-export function summarize(db: DB, order: Order): OrderSummary {
-  const lines: LineDetail[] = []
-  for (const line of order.lines) {
-    const sku = db.skus.find((s) => s.id === line.skuId)
+export function summarizePallet(db: DB, pallet: Pallet, colorOf: (skuId: string) => number): PalletStat {
+  let boxes = 0
+  let qty = 0
+  let volume = 0
+  let weight = 0
+  const segments: PalletStat['segments'] = []
+
+  for (const it of pallet.items) {
+    const sku = db.skus.find((s) => s.id === it.skuId)
     if (!sku) continue
-    const b = boxify(line.qty, sku.perBox)
+    boxes += it.boxes
+    qty += it.boxes * sku.perBox
+    volume += it.boxes * boxVolume(sku)
+    weight += it.boxes * sku.boxWeight
+    segments.push({ skuId: sku.id, color: colorOf(sku.id), count: it.boxes })
+  }
+
+  return { pallet, boxes, qty, volume, weight, segments }
+}
+
+export function summarize(db: DB, order: Order): OrderSummary {
+  const colorIndex = new Map<string, number>()
+  const colorOf = (id: string) => {
+    if (!colorIndex.has(id)) colorIndex.set(id, colorIndex.size)
+    return colorIndex.get(id)!
+  }
+
+  const pallets = order.pallets.map((p) => summarizePallet(db, p, colorOf))
+
+  const boxMap = new Map<string, number>()
+  for (const p of order.pallets) {
+    for (const it of p.items) boxMap.set(it.skuId, (boxMap.get(it.skuId) ?? 0) + it.boxes)
+  }
+
+  const lines: LineDetail[] = []
+  for (const [skuId, boxes] of boxMap) {
+    const sku = db.skus.find((s) => s.id === skuId)
+    if (!sku) continue
     lines.push({
       sku,
-      qty: line.qty,
-      full: b.full,
-      tail: b.tail,
-      boxes: b.total,
-      volume: b.total * boxVolume(sku),
-      weight: b.total * sku.boxWeight,
+      boxes,
+      qty: boxes * sku.perBox,
+      volume: boxes * boxVolume(sku),
+      weight: boxes * sku.boxWeight,
     })
   }
+  lines.sort((a, b) => b.boxes - a.boxes)
+
   return {
+    pallets,
     lines,
+    totalPallets: pallets.length,
     totalQty: lines.reduce((s, l) => s + l.qty, 0),
     totalBoxes: lines.reduce((s, l) => s + l.boxes, 0),
     totalVolume: lines.reduce((s, l) => s + l.volume, 0),
@@ -65,7 +108,6 @@ export type TruckPlan = {
   overVolume: boolean
   overWeight: boolean
   trucksNeeded: number
-  /** 按主导箱规估算：每层可放箱数 */
   perLayer: number
   layers: number
   layout: {
@@ -76,7 +118,6 @@ export type TruckPlan = {
     perLayer: number
     layers: number
     capacityPerTruck: number
-    trucks: number
   }[]
 }
 
@@ -120,7 +161,6 @@ export function planTruck(truck: Truck, summary: OrderSummary): TruckPlan {
         perLayer: m.perLayer,
         layers: m.layers,
         capacityPerTruck: m.total || 1,
-        trucks: Math.ceil(l.boxes / (m.total || 1)),
       }
     })
     .sort((a, b) => b.capacityPerTruck - a.capacityPerTruck)
@@ -134,31 +174,23 @@ export function planTruck(truck: Truck, summary: OrderSummary): TruckPlan {
     weightRate,
     overVolume: volumeRate > 1,
     overWeight: weightRate > 1,
-    trucksNeeded: Math.max(1, Math.max(volumeRate, weightRate) > 0 ? Math.ceil(Math.max(volumeRate, weightRate)) : 1),
+    trucksNeeded: Math.max(1, Math.ceil(Math.max(volumeRate, weightRate))),
     perLayer: dominant?.perLayer ?? 0,
     layers: dominant?.layers ?? 0,
     layout,
   }
 }
 
-/** 车厢能装下的估算层数（按主导箱规） */
-export function loadSuggestion(plan: TruckPlan, summary: OrderSummary) {
-  const d = plan.layout[0]
-  if (!d) return []
-  const out: string[] = []
-  const perLayer = d.perLayer || 1
-  const layers = d.layers || 1
-  const capacity = perLayer * layers
-  if (capacity >= summary.totalBoxes) {
-    const needLayers = Math.ceil(summary.totalBoxes / perLayer)
-    out.push(`每层可放 ${perLayer} 箱，铺 ${needLayers} 层即可装完（车厢最多 ${layers} 层）`)
-  } else {
-    const trucks = Math.ceil(summary.totalBoxes / capacity)
-    out.push(`单车最多装 ${capacity} 箱，本单需 ${trucks} 车`)
-  }
-  return out
-}
-
 export function fmt(n: number, digits = 2) {
   return Number.isFinite(n) ? n.toFixed(digits).replace(/\.?0+$/, '') : '0'
 }
+
+/** 拖板配色，按品项顺序循环 */
+export const PALLET_COLORS = [
+  { fill: '#c7d7f5', stroke: '#2563eb' },
+  { fill: '#a9e3cd', stroke: '#0f6e56' },
+  { fill: '#f7cfae', stroke: '#b45309' },
+  { fill: '#d6ccf7', stroke: '#5b46b8' },
+  { fill: '#f5c2ce', stroke: '#a32d5e' },
+  { fill: '#cfe3a8', stroke: '#4d7c0f' },
+]

@@ -104,6 +104,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4.5 20c0-3.6 3.4-5.6 7.5-5.6s7.5 2 7.5 5.6" />
     </>
   ),
+  pallet: (
+    <>
+      <path d="M4 4h16v11.5H4z" />
+      <path d="M3 15.5h18V18H3z" />
+      <path d="M7.5 18v2.5M12 18v2.5M16.5 18v2.5" />
+    </>
+  ),
   scan: (
     <>
       <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8" />

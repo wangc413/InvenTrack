@@ -643,3 +643,77 @@ textarea.input {
 .bar > i.bad {
   background: var(--danger);
 }
+
+.pallet-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px 14px 14px;
+}
+
+.pallet-card:active {
+  background: #fbfcfd;
+}
+
+.pallet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pallet-no {
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--primary-soft);
+  color: var(--primary);
+  padding: 2px 9px;
+  border-radius: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pallet-stats {
+  font-size: 12px;
+  color: var(--sub);
+}
+
+.pallet-art {
+  background: #fafbfc;
+  border: 1px solid #eef0f3;
+  border-radius: 10px;
+  padding: 10px 8px 8px;
+}
+
+.pallet-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.pallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  background: #f6f7f9;
+  border-radius: 7px;
+  padding: 4px 8px;
+  color: var(--sub);
+  max-width: 100%;
+}
+
+.pallet-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.pallet-chip b {
+  color: var(--text);
+  font-weight: 500;
+}
+

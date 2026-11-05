@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { getState, replaceAll, resetAll, useDB, type DB } from '../lib/store'
-import { boxVolume, boxify } from '../lib/calc'
+import { boxVolume } from '../lib/calc'
 import { toast } from '../components/UI'
 
 function download(name: string, content: BlobPart, type: string) {
@@ -35,23 +35,27 @@ export default function Me() {
   }
 
   const exportCsv = () => {
-    const rows: string[][] = [['发货单号', '日期', '客户', '品名', '规格', '件数', '箱数', '体积m3', '重量kg']]
+    const rows: string[][] = [
+      ['发货单号', '日期', '客户', '拖板号', '品名', '规格', '箱数', '件数', '体积m3', '重量kg'],
+    ]
     for (const o of db.orders) {
-      for (const line of o.lines) {
-        const sku = db.skus.find((s) => s.id === line.skuId)
-        if (!sku) continue
-        const b = boxify(line.qty, sku.perBox)
-        rows.push([
-          o.no,
-          new Date(o.createdAt).toLocaleDateString('zh-CN'),
-          o.customer,
-          sku.name,
-          sku.spec,
-          String(line.qty),
-          String(b.total),
-          (b.total * boxVolume(sku)).toFixed(3),
-          String(b.total * sku.boxWeight),
-        ])
+      for (const p of o.pallets) {
+        for (const it of p.items) {
+          const sku = db.skus.find((s) => s.id === it.skuId)
+          if (!sku) continue
+          rows.push([
+            o.no,
+            new Date(o.createdAt).toLocaleDateString('zh-CN'),
+            o.customer,
+            p.no,
+            sku.name,
+            sku.spec,
+            String(it.boxes),
+            String(it.boxes * sku.perBox),
+            (it.boxes * boxVolume(sku)).toFixed(3),
+            String(it.boxes * sku.boxWeight),
+          ])
+        }
       }
     }
     const csv = '\ufeff' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
