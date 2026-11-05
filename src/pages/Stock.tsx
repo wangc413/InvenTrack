@@ -1,14 +1,42 @@
 import { useMemo, useState } from 'react'
-import { addBatch, batchesOf, removeBatch, stockOf, useDB, type Sku } from '../lib/store'
+import {
+  addBatch,
+  adjustBatch,
+  batchesOf,
+  removeBatch,
+  returnToBatch,
+  movesOf,
+  stockOf,
+  todayFlow,
+  useDB,
+  type Sku,
+} from '../lib/store'
 import { boxify } from '../lib/calc'
 import { Sheet, toast } from '../components/UI'
+
+type Mode = 'in' | 'return' | 'adjust'
+
+const TYPE_LABEL: Record<string, string> = {
+  in: '入库',
+  out: '出库',
+  return: '回补',
+  adjust: '调整',
+}
+
+function fmtTime(ts: number) {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 
 export default function Stock() {
   const db = useDB()
   const [q, setQ] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
-  const [inboundFor, setInboundFor] = useState<Sku | null>(null)
+  const [sheet, setSheet] = useState<{ mode: Mode; sku: Sku; batchId?: string } | null>(null)
+
   const [qty, setQty] = useState('')
+  const [actual, setActual] = useState('')
   const [batchNo, setBatchNo] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
 
@@ -21,17 +49,53 @@ export default function Stock() {
   }, [db, q])
 
   const totalQty = list.reduce((s, x) => s + x.left, 0)
+  const flow = todayFlow(db)
 
-  const submitInbound = () => {
-    const n = Number(qty)
-    if (!inboundFor) return
-    if (!n || n <= 0) return toast('请输入入库数量')
-    addBatch({ skuId: inboundFor.id, batchNo: batchNo.trim(), qty: n, prodDate: date })
-    toast(`已入库 ${n} 件`)
-    setInboundFor(null)
+  const openSheet = (mode: Mode, sku: Sku, batchId?: string) => {
+    setSheet({ mode, sku, batchId })
     setQty('')
+    setActual('')
     setBatchNo('')
+    if (mode === 'adjust' && batchId) {
+      setActual(String(batchesOf(db, sku.id).find((x) => x.batch.id === batchId)?.left ?? 0))
+    }
   }
+
+  const closeSheet = () => setSheet(null)
+
+  const submit = () => {
+    if (!sheet) return
+    const { mode, sku, batchId } = sheet
+
+    if (mode === 'in') {
+      const n = Number(qty)
+      if (!n || n <= 0) return toast('请输入入库件数')
+      addBatch({ skuId: sku.id, batchNo: batchNo.trim(), qty: n, prodDate: date })
+      toast(`已入库 ${n} 件`)
+    }
+
+    if (mode === 'return') {
+      const n = Number(qty)
+      if (!batchId) return
+      if (!n || n <= 0) return toast('请输入退货件数')
+      returnToBatch(batchId, n)
+      toast(`已回补 ${n} 件`)
+    }
+
+    if (mode === 'adjust') {
+      if (!batchId) return
+      const n = Number(actual)
+      if (!Number.isFinite(n) || n < 0) return toast('请输入实际数量')
+      adjustBatch(batchId, n)
+      toast('已按实盘调整')
+    }
+
+    closeSheet()
+  }
+
+  const title = sheet
+    ? `${sheet.mode === 'in' ? '入库' : sheet.mode === 'return' ? '退货入库' : '盘点调整'} · ${sheet.sku.name}`
+    : ''
 
   return (
     <>
@@ -39,7 +103,8 @@ export default function Stock() {
         <div style={{ flex: 1 }}>
           <h1>库存</h1>
           <div className="sub">
-            共 {db.skus.length} 个品项 · 余存 {totalQty} 件
+            共 {db.skus.length} 个品项 · 结存 {totalQty} 件
+            {(flow.inQty > 0 || flow.outQty > 0) && ` · 今日 入 ${flow.inQty} / 出 ${flow.outQty}`}
           </div>
         </div>
       </header>
@@ -60,7 +125,8 @@ export default function Stock() {
             list.map(({ sku, left }) => {
               const b = boxify(left, sku.perBox)
               const open = openId === sku.id
-              const batches = batchesOf(db, sku.id)
+              const batches = open ? batchesOf(db, sku.id) : []
+              const moves = open ? movesOf(db, sku.id, 6) : []
               return (
                 <div key={sku.id}>
                   <div className="row" onClick={() => setOpenId(open ? null : sku.id)}>
@@ -71,7 +137,10 @@ export default function Stock() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
-                      <div className={`num ${left <= 0 ? '' : ''}`} style={{ fontSize: 17, fontWeight: 600, color: left > 0 ? 'var(--text)' : 'var(--danger)' }}>
+                      <div
+                        className="num"
+                        style={{ fontSize: 17, fontWeight: 600, color: left > 0 ? 'var(--text)' : 'var(--danger)' }}
+                      >
                         {left}
                       </div>
                       <div className="meta num">件 / {b.total} 箱</div>
@@ -80,45 +149,118 @@ export default function Stock() {
 
                   {open && (
                     <div style={{ background: '#fafbfc', borderTop: '1px solid var(--line)', padding: '10px 14px 14px' }}>
+                      <div className="sub-label">批次（按入库先后，发车时先进先出）</div>
                       {batches.length === 0 ? (
-                        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '6px 0' }}>还没有入库记录</div>
+                        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 10px' }}>没有余量批次</div>
                       ) : (
-                        batches.map((bt) => (
+                        batches.map(({ batch, left: bLeft }) => (
                           <div
-                            key={bt.id}
-                            className="kv"
-                            style={{ fontSize: 13, borderBottom: '1px dashed var(--line)' }}
+                            key={batch.id}
+                            onClick={() => openSheet('adjust', sku, batch.id)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '9px 0',
+                              borderBottom: '1px dashed var(--line)',
+                              fontSize: 13,
+                            }}
                           >
-                            <span style={{ color: 'var(--sub)' }}>
-                              {bt.batchNo} · {bt.prodDate}
-                            </span>
-                            <span className="num" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              {bt.left} 件
-                              <span
-                                style={{ color: 'var(--danger)', fontSize: 12 }}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 500 }}>{batch.batchNo}</div>
+                              <div style={{ color: 'var(--sub)', fontSize: 12 }}>
+                                生产 {batch.prodDate || '—'} · 入库 {batch.qty} 件
+                              </div>
+                            </div>
+                            <div className="num" style={{ fontWeight: 600, color: bLeft > 0 ? 'var(--text)' : 'var(--danger)' }}>
+                              {bLeft} 件
+                            </div>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button
+                                className="btn sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  if (confirm(`删除批次 ${bt.batchNo}（剩 ${bt.left} 件）？`)) removeBatch(bt.id)
+                                  openSheet('return', sku, batch.id)
                                 }}
                               >
-                                删
-                              </span>
+                                退货
+                              </button>
+                              <button
+                                className="btn sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openSheet('adjust', sku, batch.id)
+                                }}
+                              >
+                                盘点
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+
+                      <div className="sub-label" style={{ marginTop: 14 }}>
+                        最近流水
+                      </div>
+                      {moves.length === 0 ? (
+                        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 2px' }}>还没有流水</div>
+                      ) : (
+                        moves.map((m) => (
+                          <div
+                            key={m.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              fontSize: 12,
+                              color: 'var(--sub)',
+                              padding: '5px 0',
+                            }}
+                          >
+                            <span style={{ width: 84, flex: '0 0 auto' }}>{fmtTime(m.at)}</span>
+                            <span style={{ width: 34, flex: '0 0 auto' }}>{TYPE_LABEL[m.type] ?? m.type}</span>
+                            <span
+                              className="num"
+                              style={{
+                                width: 56,
+                                flex: '0 0 auto',
+                                fontWeight: 600,
+                                color: m.qty > 0 ? 'var(--ok)' : 'var(--text)',
+                              }}
+                            >
+                              {m.qty > 0 ? `+${m.qty}` : m.qty}
+                            </span>
+                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {m.ref}
                             </span>
                           </div>
                         ))
                       )}
-                      <button
-                        className="btn sm"
-                        style={{ marginTop: 12, width: '100%' }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setInboundFor(sku)
-                          setQty('')
-                          setBatchNo('')
-                        }}
-                      >
-                        + 入库
-                      </button>
+
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button
+                          className="btn primary sm"
+                          style={{ flex: 1 }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openSheet('in', sku)
+                          }}
+                        >
+                          + 入库
+                        </button>
+                        <button
+                          className="btn sm"
+                          style={{ flex: 1 }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const first = batches[0]
+                            if (!first) return toast('还没有批次，先入库')
+                            openSheet('return', sku, first.batch.id)
+                          }}
+                        >
+                          退货入库
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -126,16 +268,46 @@ export default function Stock() {
             })
           )}
         </div>
+
+        <div className="hint">
+          库存不是直接改的数字，而是每一笔入库、发车、退货、盘点攒出来的。点开品项能看到账是怎么来的。
+        </div>
       </main>
 
-      <Sheet
-        open={inboundFor !== null}
-        title={`入库 · ${inboundFor?.name ?? ''}`}
-        onClose={() => setInboundFor(null)}
-      >
-        <div className="row-2">
-          <div className="field" style={{ flex: 1 }}>
-            <label>入库件数 *</label>
+      <Sheet open={sheet !== null} title={title} onClose={closeSheet}>
+        {sheet?.mode === 'in' && (
+          <>
+            <div className="row-2">
+              <div className="field" style={{ flex: 1 }}>
+                <label>入库件数 *</label>
+                <input
+                  className="input num"
+                  inputMode="numeric"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>批次号</label>
+                <input className="input" value={batchNo} onChange={(e) => setBatchNo(e.target.value)} placeholder="B20261105" />
+              </div>
+            </div>
+            <div className="field">
+              <label>生产 / 到货日期</label>
+              <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            {Number(qty) > 0 && (
+              <div style={{ fontSize: 13, color: 'var(--sub)', marginBottom: 12 }}>
+                = {boxify(Number(qty), sheet.sku.perBox).total} 箱（每箱 {sheet.sku.perBox} 件）
+              </div>
+            )}
+          </>
+        )}
+
+        {sheet?.mode === 'return' && (
+          <div className="field">
+            <label>退回件数 *</label>
             <input
               className="input num"
               inputMode="numeric"
@@ -143,24 +315,50 @@ export default function Stock() {
               onChange={(e) => setQty(e.target.value)}
               placeholder="0"
             />
-          </div>
-          <div className="field" style={{ flex: 1 }}>
-            <label>批次号</label>
-            <input className="input" value={batchNo} onChange={(e) => setBatchNo(e.target.value)} placeholder="B20261105" />
-          </div>
-        </div>
-        <div className="field">
-          <label>生产 / 到货日期</label>
-          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </div>
-        {inboundFor && Number(qty) > 0 && (
-          <div style={{ fontSize: 13, color: 'var(--sub)', marginBottom: 12 }}>
-            = {boxify(Number(qty), inboundFor.perBox).total} 箱（每箱 {inboundFor.perBox} 件）
+            <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 8 }}>
+              会加回到这个批次的余量里，也算作一笔入库流水
+            </div>
           </div>
         )}
-        <button className="btn primary" onClick={submitInbound}>
-          确认入库
+
+        {sheet?.mode === 'adjust' && (
+          <div className="field">
+            <label>实际盘点数量 *</label>
+            <input
+              className="input num"
+              inputMode="numeric"
+              value={actual}
+              onChange={(e) => setActual(e.target.value)}
+              placeholder="0"
+            />
+            <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 8 }}>
+              账面 {sheet.batchId ? batchesOf(db, sheet.sku.id).find((x) => x.batch.id === sheet.batchId)?.left ?? 0 : 0} 件，
+              差额会自动记成一笔调整流水
+            </div>
+          </div>
+        )}
+
+        <button className="btn primary" onClick={submit} style={{ marginTop: 6 }}>
+          确认
         </button>
+
+        {sheet?.mode === 'adjust' && sheet.batchId && (
+          <button
+            className="btn danger"
+            style={{ marginTop: 10 }}
+            onClick={() => {
+              const batch = db.batches.find((b) => b.id === sheet.batchId)
+              if (!batch) return
+              if (confirm(`删除批次 ${batch.batchNo}？这会连同它的所有流水一起删除，不可撤销。`)) {
+                removeBatch(batch.id)
+                closeSheet()
+                toast('批次已删除')
+              }
+            }}
+          >
+            删除这个批次
+          </button>
+        )}
       </Sheet>
     </>
   )

@@ -6,6 +6,7 @@ import {
   removePallet,
   setItemBoxes,
   shipOrder,
+  shortages,
   updateOrder,
   useDB,
   type Pallet,
@@ -111,6 +112,18 @@ export default function Pallets() {
     if (filled.length === 0) return toast('还没有装货')
     const empties = draft.pallets.length - filled.length
     if (empties > 0 && !confirm(`有 ${empties} 块空拖板，确认按 ${filled.length} 块拖板发车？`)) return
+
+    const lack = shortages(db, draft)
+    if (lack.length > 0) {
+      const detail = lack.map((l) => `${l.sku.name} 差 ${l.short} 件`).join('、')
+      if (
+        !confirm(
+          `库存不够：${detail}。\n\n继续发车的话，缺的部分会记成超发（账面负数），事后可以用入库或盘点把它平掉。\n\n确认继续发车？`,
+        )
+      )
+        return
+    }
+
     shipOrder(draft.id)
     setEditingId(null)
     toast('已发车，库存已扣减')

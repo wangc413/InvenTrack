@@ -17,10 +17,32 @@ export type Batch = {
   id: string
   skuId: string
   batchNo: string
+  /** 入库时的总量，只作记录；实际余量由流水算出 */
   qty: number
-  left: number
   prodDate: string
   createdAt: number
+}
+
+export type MoveType = 'in' | 'out' | 'return' | 'adjust'
+
+/**
+ * 一条库存流水。
+ * 关键设计：库存不存“当前值”，永远由流水累加得到。
+ * 这样发货、退货、盘点、撤销都只是“再记一笔”，不会出现两处数字对不上。
+ */
+export type Move = {
+  id: string
+  at: number
+  type: MoveType
+  skuId: string
+  batchId: string
+  /** 带符号：正数增加库存，负数减少库存 */
+  qty: number
+  /** 关联单号或来源，撤销时靠它找回原流水 */
+  ref: string
+  note: string
+  /** 已被撤销过：避免“发车→撤销→再发车→再撤销”时把库存补两次 */
+  voided?: boolean
 }
 
 /** 一个拖板上某品项放了几箱 */
@@ -56,6 +78,7 @@ export type Truck = {
 export type DB = {
   skus: Sku[]
   batches: Batch[]
+  moves: Move[]
   orders: Order[]
   trucks: Truck[]
   seq: number
@@ -67,6 +90,7 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 
 function seed(): DB {
   const today = new Date().toISOString().slice(0, 10)
+  const now = Date.now()
   const a: Sku = {
     id: 'demo1', code: '6901234567890', name: '示例·纸箱装A', spec: '500g×12',
     unit: '箱', perBox: 12, boxL: 40, boxW: 30, boxH: 25, boxWeight: 6.5,
@@ -75,11 +99,14 @@ function seed(): DB {
     id: 'demo2', code: '6909876543210', name: '示例·礼盒B', spec: '250g×24',
     unit: '箱', perBox: 24, boxL: 50, boxW: 35, boxH: 30, boxWeight: 9,
   }
+  const ba: Batch = { id: uid(), skuId: a.id, batchNo: 'B20261101', qty: 240, prodDate: today, createdAt: now }
+  const bb: Batch = { id: uid(), skuId: b.id, batchNo: 'B20261028', qty: 120, prodDate: today, createdAt: now }
   return {
     skus: [a, b],
-    batches: [
-      { id: uid(), skuId: a.id, batchNo: 'B20261101', qty: 240, left: 240, prodDate: today, createdAt: Date.now() },
-      { id: uid(), skuId: b.id, batchNo: 'B20261028', qty: 120, left: 120, prodDate: today, createdAt: Date.now() },
+    batches: [ba, bb],
+    moves: [
+      { id: uid(), at: now, type: 'in', skuId: a.id, batchId: ba.id, qty: 240, ref: '期初', note: '示例入库' },
+      { id: uid(), at: now, type: 'in', skuId: b.id, batchId: bb.id, qty: 120, ref: '期初', note: '示例入库' },
     ],
     orders: [],
     trucks: [{ id: uid(), name: '4.2米厢货', L: 420, W: 200, H: 220, maxWeight: 2000 }],
@@ -90,14 +117,52 @@ function seed(): DB {
 function migrate(raw: Record<string, unknown>): DB {
   const base = seed()
   const data = raw as Partial<DB>
+
   const orders = (data.orders ?? []).map((o) => {
     const legacy = o as Order & { lines?: { skuId: string; qty: number }[] }
     const pallets = Array.isArray(legacy.pallets) ? legacy.pallets : []
     return { ...legacy, pallets } as Order
   })
+
+  // 批次：丢掉旧的 left 字段，余量一律由流水算
+  const rawBatches = (Array.isArray(data.batches) ? data.batches : base.batches) as (Batch & { left?: number })[]
+  const batches: Batch[] = rawBatches.map((b) => ({
+    id: b.id,
+    skuId: b.skuId,
+    batchNo: b.batchNo ?? '无批次',
+    qty: Number(b.qty) || 0,
+    prodDate: b.prodDate ?? '',
+    createdAt: Number(b.createdAt) || Date.now(),
+  }))
+
+  // 没有流水的老数据：按“入库总量 - 已发出”倒推，保证结转后的余量和以前一致
+  let moves: Move[]
+  if (Array.isArray(data.moves)) {
+    moves = data.moves
+  } else {
+    moves = []
+    for (const b of rawBatches) {
+      const at = Number(b.createdAt) || Date.now()
+      const total = Number(b.qty) || 0
+      const left = b.left
+      if (total > 0) {
+        moves.push({ id: uid(), at, type: 'in', skuId: b.skuId, batchId: b.id, qty: total, ref: '期初', note: '历史结转' })
+      }
+      if (typeof left !== 'number') continue
+      const used = total - left
+      if (used > 0) {
+        moves.push({ id: uid(), at, type: 'out', skuId: b.skuId, batchId: b.id, qty: -used, ref: '期初', note: '历史已发' })
+      } else if (used < 0) {
+        // 老数据里余量比入库量还多（当时手工加过），补一笔调整把差额补上
+        moves.push({ id: uid(), at, type: 'adjust', skuId: b.skuId, batchId: b.id, qty: -used, ref: '期初', note: '历史盘盈' })
+      }
+    }
+  }
+
   return {
     skus: data.skus ?? base.skus,
-    batches: data.batches ?? base.batches,
+    batches,
+    moves,
     orders,
     trucks: data.trucks?.length ? data.trucks : base.trucks,
     seq: data.seq ?? 1,
@@ -356,26 +421,88 @@ export function removeSku(id: string) {
     ...state,
     skus: state.skus.filter((s) => s.id !== id),
     batches: state.batches.filter((b) => b.skuId !== id),
+    moves: state.moves.filter((m) => m.skuId !== id),
   })
 }
 
-/* ---------- 批次入库 ---------- */
+/* ---------- 库存流水 ---------- */
 
-export function addBatch(input: { skuId: string; batchNo: string; qty: number; prodDate: string }) {
+function pushMove(db: DB, move: Omit<Move, 'id' | 'at'> & { at?: number }): Move[] {
+  const m: Move = { ...move, id: uid(), at: move.at ?? Date.now() }
+  return [m, ...db.moves]
+}
+
+/** 入库：建一个批次，同时记一条入账流水 */
+export function addBatch(input: { skuId: string; batchNo: string; qty: number; prodDate: string; note?: string }) {
+  if (!(input.qty > 0)) return ''
   const batch: Batch = {
     id: uid(),
     skuId: input.skuId,
     batchNo: input.batchNo || '无批次',
     qty: input.qty,
-    left: input.qty,
     prodDate: input.prodDate,
     createdAt: Date.now(),
   }
-  commit({ ...state, batches: [batch, ...state.batches] })
+  commit({
+    ...state,
+    batches: [batch, ...state.batches],
+    moves: pushMove(state, {
+      type: 'in',
+      skuId: input.skuId,
+      batchId: batch.id,
+      qty: input.qty,
+      ref: '入库',
+      note: input.note ?? '手工入库',
+    }),
+  })
+  return batch.id
 }
 
+/** 退货 / 补货：往已有批次里加数量 */
+export function returnToBatch(batchId: string, qty: number, note = '退货入库') {
+  const batch = state.batches.find((b) => b.id === batchId)
+  if (!batch || !(qty > 0)) return
+  commit({
+    ...state,
+    batches: state.batches.map((b) => (b.id === batchId ? { ...b, qty: b.qty + qty } : b)),
+    moves: pushMove(state, {
+      type: 'return',
+      skuId: batch.skuId,
+      batchId,
+      qty,
+      ref: '退货',
+      note,
+    }),
+  })
+}
+
+/** 盘点：把某批次调成实际数量，差额记一笔调整流水 */
+export function adjustBatch(batchId: string, actual: number, note = '盘点调整') {
+  const batch = state.batches.find((b) => b.id === batchId)
+  if (!batch) return
+  const current = batchLeft(state, batchId)
+  const diff = Math.round(actual) - current
+  if (diff === 0) return
+  commit({
+    ...state,
+    moves: pushMove(state, {
+      type: 'adjust',
+      skuId: batch.skuId,
+      batchId,
+      qty: diff,
+      ref: '盘点',
+      note: `${note}（账面 ${current} → 实盘 ${Math.round(actual)}）`,
+    }),
+  })
+}
+
+/** 删除批次：连同它的流水一起删掉（等于这批货从账上消失） */
 export function removeBatch(id: string) {
-  commit({ ...state, batches: state.batches.filter((b) => b.id !== id) })
+  commit({
+    ...state,
+    batches: state.batches.filter((b) => b.id !== id),
+    moves: state.moves.filter((m) => m.batchId !== id),
+  })
 }
 
 /* ---------- 车次 / 发货单 ---------- */
@@ -475,37 +602,117 @@ export function movePallet(orderId: string, palletId: string, dir: -1 | 1) {
   })
 }
 
-/** 确认发车：按拖板汇总箱数，折成件数后先进先出扣库存 */
-export function shipOrder(id: string) {
-  const order = state.orders.find((o) => o.id === id)
-  if (!order || order.status === 'shipped') return
-  const batches = state.batches.map((b) => ({ ...b }))
-
+/** 这车货每个品项要出多少箱 */
+export function needOf(order: Order) {
   const need = new Map<string, number>()
   for (const p of order.pallets) {
     for (const it of p.items) {
       need.set(it.skuId, (need.get(it.skuId) ?? 0) + it.boxes)
     }
   }
+  return need
+}
 
-  for (const [skuId, boxes] of need) {
+/** 发车前对一下账：哪些品项不够，各差多少件 */
+export function shortages(db: DB, order: Order) {
+  const out: { sku: Sku; need: number; have: number; short: number }[] = []
+  for (const [skuId, boxes] of needOf(order)) {
+    const sku = db.skus.find((s) => s.id === skuId)
+    if (!sku) continue
+    const need = boxes * (sku.perBox || 1)
+    const have = stockOf(db, skuId)
+    if (need > have) out.push({ sku, need, have, short: need - have })
+  }
+  return out
+}
+
+/**
+ * 确认发车：按拖板汇总箱数，折成件数后先进先出扣库存。
+ * 扣减不是改数字，而是给每个被吃到的批次记一笔负数流水。
+ * 库存不够时照样记（账面会出现负数），前端负责提示。
+ */
+export function shipOrder(id: string) {
+  const order = state.orders.find((o) => o.id === id)
+  if (!order || order.status === 'shipped') return
+
+  let moves = state.moves
+  const newMoves: Move[] = []
+
+  for (const [skuId, boxes] of needOf(order)) {
     const sku = state.skus.find((s) => s.id === skuId)
     let remain = boxes * (sku?.perBox || 1)
-    const pool = batches
-      .filter((b) => b.skuId === skuId && b.left > 0)
-      .sort((a, b) => a.createdAt - b.createdAt)
-    for (const b of pool) {
+
+    const pool = state.batches
+      .filter((b) => b.skuId === skuId)
+      .map((b) => ({ batch: b, left: batchLeft(state, b.id) }))
+      .filter((x) => x.left > 0)
+      .sort((a, b) => a.batch.createdAt - b.batch.createdAt)
+
+    for (const { batch, left } of pool) {
       if (remain <= 0) break
-      const take = Math.min(b.left, remain)
-      b.left -= take
+      const take = Math.min(left, remain)
       remain -= take
+      newMoves.push({
+        id: uid(),
+        at: Date.now(),
+        type: 'out',
+        skuId,
+        batchId: batch.id,
+        qty: -take,
+        ref: order.no,
+        note: '发车出库',
+      })
+    }
+
+    // 所有批次都吃空了还不够：记一笔无批次的负数流水，把缺口显性化，方便事后补
+    if (remain > 0) {
+      newMoves.push({
+        id: uid(),
+        at: Date.now(),
+        type: 'out',
+        skuId,
+        batchId: '',
+        qty: -remain,
+        ref: order.no,
+        note: '库存不足，超发部分',
+      })
     }
   }
 
+  moves = [...newMoves.reverse(), ...moves]
+
   commit({
     ...state,
-    batches,
+    moves,
     orders: state.orders.map((o) => (o.id === id ? { ...o, status: 'shipped' } : o)),
+  })
+}
+
+/** 撤销发车：把这单的出库流水逐条反向记回去，单据退回未发车 */
+export function unshipOrder(id: string) {
+  const order = state.orders.find((o) => o.id === id)
+  if (!order || order.status !== 'shipped') return
+
+  const outs = state.moves.filter((m) => m.type === 'out' && m.ref === order.no && !m.voided)
+  if (outs.length === 0) return
+
+  const back: Move[] = outs.map((m) => ({
+    id: uid(),
+    at: Date.now(),
+    type: 'return',
+    skuId: m.skuId,
+    batchId: m.batchId,
+    qty: -m.qty,
+    ref: order.no,
+    note: '撤销发车，库存回补',
+  }))
+
+  const reversed = new Set(outs.map((m) => m.id))
+
+  commit({
+    ...state,
+    moves: [...back, ...state.moves.map((m) => (reversed.has(m.id) ? { ...m, voided: true } : m))],
+    orders: state.orders.map((o) => (o.id === id ? { ...o, status: 'draft' } : o)),
   })
 }
 
@@ -525,12 +732,53 @@ export function saveTruck(t: Omit<Truck, 'id'> & { id?: string }) {
 
 export const skuById = (skus: Sku[], id: string) => skus.find((s) => s.id === id)
 
-export function stockOf(db: DB, skuId: string) {
-  return db.batches.filter((b) => b.skuId === skuId).reduce((sum, b) => sum + b.left, 0)
+type Projection = { bySku: Map<string, number>; byBatch: Map<string, number> }
+let projFor: DB | null = null
+let proj: Projection = { bySku: new Map(), byBatch: new Map() }
+
+/** 把全部流水累加成“每个品项、每个批次还剩多少”。按数据对象缓存，一次改动只算一遍 */
+function project(db: DB): Projection {
+  if (projFor === db) return proj
+  const bySku = new Map<string, number>()
+  const byBatch = new Map<string, number>()
+  for (const m of db.moves) {
+    bySku.set(m.skuId, (bySku.get(m.skuId) ?? 0) + m.qty)
+    if (m.batchId) byBatch.set(m.batchId, (byBatch.get(m.batchId) ?? 0) + m.qty)
+  }
+  projFor = db
+  proj = { bySku, byBatch }
+  return proj
 }
 
+export const batchLeft = (db: DB, batchId: string) => project(db).byBatch.get(batchId) ?? 0
+export const stockOf = (db: DB, skuId: string) => project(db).bySku.get(skuId) ?? 0
+
+/** 某品项还有货的批次，按入库先后排（先进先出用这个顺序） */
 export function batchesOf(db: DB, skuId: string) {
-  return db.batches.filter((b) => b.skuId === skuId && b.left > 0).sort((a, b) => a.createdAt - b.createdAt)
+  return db.batches
+    .filter((b) => b.skuId === skuId)
+    .map((batch) => ({ batch, left: batchLeft(db, batch.id) }))
+    .filter((x) => x.left > 0)
+    .sort((a, b) => a.batch.createdAt - b.batch.createdAt)
+}
+
+/** 某品项最近的库存流水 */
+export function movesOf(db: DB, skuId: string, limit = 12) {
+  return db.moves.filter((m) => m.skuId === skuId).slice(0, limit)
+}
+
+/** 今日入库 / 出库件数（退货算入，调整按正负各归一边） */
+export function todayFlow(db: DB) {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  let inQty = 0
+  let outQty = 0
+  for (const m of db.moves) {
+    if (m.at < start.getTime()) continue
+    if (m.qty > 0) inQty += m.qty
+    else outQty += -m.qty
+  }
+  return { inQty, outQty }
 }
 
 export function findByCode(db: DB, code: string) {

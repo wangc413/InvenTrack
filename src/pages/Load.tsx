@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { saveTruck, useDB, type Truck } from '../lib/store'
+import { saveTruck, unshipOrder, useDB, type Truck } from '../lib/store'
 import { fmt, planTruck, summarize } from '../lib/calc'
 import { Sheet, toast } from '../components/UI'
 
@@ -144,6 +144,27 @@ export default function Load() {
                     {plan.trucksNeeded > 1 && ` 本单建议 ${plan.trucksNeeded} 车。`}
                   </div>
                 </div>
+
+                {order?.status === 'shipped' && (
+                  <div className="card card-pad" style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>这单已发车</div>
+                    <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 6, lineHeight: 1.75 }}>
+                      发错货、客户临时取消，都可以撤销。撤销会把扣掉的库存按原批次加回去，单据退回「未发车」，改完能再发一次。
+                    </div>
+                    <button
+                      className="btn sm"
+                      style={{ marginTop: 10, width: '100%' }}
+                      onClick={() => {
+                        if (!order) return
+                        if (!confirm(`撤销 ${order.no}？库存会按原批次回补。`)) return
+                        unshipOrder(order.id)
+                        toast('已撤销，库存已回补')
+                      }}
+                    >
+                      撤销发车 · 库存回补
+                    </button>
+                  </div>
+                )}
 
                 {grid && truck && dominant && (
                   <>

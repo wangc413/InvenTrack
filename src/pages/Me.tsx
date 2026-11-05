@@ -80,6 +80,27 @@ export default function Me() {
     toast('明细已导出，可用 Excel 打开')
   }
 
+  const exportMoves = () => {
+    const label: Record<string, string> = { in: '入库', out: '出库', return: '回补', adjust: '调整' }
+    const rows: string[][] = [['时间', '类型', '品项', '批次', '数量(正入负出)', '单据/来源', '说明']]
+    for (const m of db.moves) {
+      const sku = db.skus.find((s) => s.id === m.skuId)
+      const batch = db.batches.find((b) => b.id === m.batchId)
+      rows.push([
+        new Date(m.at).toLocaleString('zh-CN'),
+        label[m.type] ?? m.type,
+        sku?.name ?? '（品项已删）',
+        batch?.batchNo ?? '—',
+        String(m.qty),
+        m.ref,
+        m.note,
+      ])
+    }
+    const csv = '\ufeff' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
+    download(`库存流水-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
+    toast('流水已导出，可用 Excel 对账')
+  }
+
   const importJson = async (file: File) => {
     try {
       const text = await file.text()
@@ -159,6 +180,13 @@ export default function Me() {
               <div className="name">导出发货明细</div>
               <div className="meta">CSV，Excel 可直接打开</div>
             </div>
+          </div>
+          <div className="row" onClick={exportMoves}>
+            <div className="grow">
+              <div className="name">导出库存流水</div>
+              <div className="meta">每一笔入库、发车、退货、盘点，用来对账</div>
+            </div>
+            <span className="tag">{db.moves.length} 条</span>
           </div>
           <div className="row" onClick={clearAll}>
             <div className="grow">
