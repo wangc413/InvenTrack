@@ -5,6 +5,7 @@ import Catalog from './pages/Catalog'
 import Load from './pages/Load'
 import Me from './pages/Me'
 import { Icon, ToastHost } from './components/UI'
+import { useStorageInfo } from './lib/store'
 
 const TABS = [
   { key: 'pallet', label: '装板', icon: 'pallet' },
@@ -18,9 +19,21 @@ type TabKey = (typeof TABS)[number]['key']
 
 export default function App() {
   const [tab, setTab] = useState<TabKey>('pallet')
+  const info = useStorageInfo()
 
   return (
     <div className="app">
+      {info.error && (
+        <div className="alert" role="alert">
+          <span>⚠️</span>
+          <span style={{ flex: 1 }}>
+            {info.error}
+            <br />
+            请到「我的 → 导出备份」先存一份，再继续操作。
+          </span>
+        </div>
+      )}
+
       {tab === 'pallet' && <Pallets />}
       {tab === 'stock' && <Stock />}
       {tab === 'catalog' && <Catalog />}

@@ -18,7 +18,10 @@ function gridOf(truck: Truck, l: number, w: number) {
 
 export default function Load() {
   const db = useDB()
-  const orders = db.orders.filter((o) => o.pallets.some((p) => p.items.length > 0))
+  // 只列未发车的单 + 最近 15 条已发车单：数据攒到几千条时也不会一次渲染上千个按钮
+  const all = db.orders.filter((o) => o.pallets.some((p) => p.items.length > 0))
+  const orders = [...all.filter((o) => o.status === 'draft'), ...all.filter((o) => o.status === 'shipped').slice(0, 15)]
+  const truncated = all.length > orders.length
   const [pickedId, setPickedId] = useState('')
   const [editing, setEditing] = useState(false)
 
@@ -76,6 +79,11 @@ export default function Load() {
                   {o.customer}
                 </button>
               ))}
+              {truncated && (
+                <span className="meta" style={{ alignSelf: 'center', whiteSpace: 'nowrap' }}>
+                  仅显示未发车 + 最近 15 单
+                </span>
+              )}
             </div>
 
             {sum && plan && (

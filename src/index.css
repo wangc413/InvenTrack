@@ -717,3 +717,42 @@ textarea.input {
   font-weight: 500;
 }
 
+/* ---------- 存储告警条 ---------- */
+.alert {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 10px 16px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+/* ---------- 容量指标 ---------- */
+.stat3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.stat3 > div {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px 6px;
+  text-align: center;
+}
+.stat3 b {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.stat3 span {
+  font-size: 11px;
+  color: var(--sub);
+}

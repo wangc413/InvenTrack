@@ -104,26 +104,209 @@ function migrate(raw: Record<string, unknown>): DB {
   }
 }
 
-function load(): DB {
+function readLocal(): DB | null {
   try {
     const raw = localStorage.getItem(KEY)
-    if (!raw) return seed()
+    if (!raw) return null
     return migrate(JSON.parse(raw))
   } catch {
-    return seed()
+    return null
   }
 }
 
-let state: DB = load()
+/* ---------- 持久化：浏览器数据库（IndexedDB）为主，localStorage 兜底 ---------- */
+
+const IDB_NAME = 'inventrack'
+const IDB_STORE = 'kv'
+const IDB_KEY = 'db'
+
+export type StorageMode = 'idb' | 'local'
+
+export type StorageInfo = {
+  /** idb = 浏览器数据库（容量按手机剩余空间算）；local = 老式缓存（约 5MB 封顶） */
+  mode: StorageMode
+  ready: boolean
+  /** 写入失败等异常信息，空字符串表示正常 */
+  error: string
+  /** 当前数据字符数 */
+  chars: number
+  /** 最近一次落盘时间 */
+  savedAt: number
+  /** 浏览器是否同意了“长期保留数据” */
+  persisted: boolean
+}
+
+let info: StorageInfo = { mode: 'local', ready: false, error: '', chars: 0, savedAt: 0, persisted: false }
+const infoListeners = new Set<() => void>()
+const emitInfo = () => {
+  info = { ...info }
+  infoListeners.forEach((fn) => fn())
+}
+
+let idb: IDBDatabase | null = null
+
+function openIdb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined') return resolve(null)
+      const req = indexedDB.open(IDB_NAME, 1)
+      req.onupgradeneeded = () => {
+        const db = req.result
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE)
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => resolve(null)
+      req.onblocked = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+function idbGet(key: string): Promise<unknown> {
+  return new Promise((resolve) => {
+    if (!idb) return resolve(null)
+    try {
+      const req = idb.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key)
+      req.onsuccess = () => resolve(req.result ?? null)
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+function idbSet(key: string, value: unknown): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!idb) return resolve(false)
+    try {
+      const tx = idb.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).put(value, key)
+      tx.oncomplete = () => resolve(true)
+      tx.onerror = () => resolve(false)
+      tx.onabort = () => resolve(false)
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
+let state: DB = seed()
 const listeners = new Set<() => void>()
+
+/** 启动时调用一次：把数据从磁盘读回内存，并完成 localStorage → IndexedDB 的迁移 */
+export async function initStore() {
+  const local = readLocal()
+  const db = await openIdb()
+
+  if (db) {
+    idb = db
+    info.mode = 'idb'
+    const stored = await idbGet(IDB_KEY)
+    if (stored && typeof stored === 'object') {
+      state = migrate(stored as Record<string, unknown>)
+    } else if (local) {
+      state = local
+      await idbSet(IDB_KEY, local)
+    } else {
+      state = seed()
+      await idbSet(IDB_KEY, state)
+    }
+    // 迁移完成，删掉 localStorage 里的旧副本，免得两份各占一份配额
+    try {
+      localStorage.removeItem(KEY)
+    } catch {
+      /* 忽略 */
+    }
+  } else {
+    state = local ?? seed()
+    info.mode = 'local'
+    if (!local) info.error = '这台手机的浏览器不支持数据库，已退回缓存模式，容量有限'
+  }
+
+  info.chars = JSON.stringify(state).length
+  info.ready = true
+  emitInfo()
+  listeners.forEach((fn) => fn())
+
+  // 申请“长期保留”，降低被浏览器当缓存清掉的可能（Chrome 静默同意，Safari 不支持）
+  try {
+    if (navigator.storage?.persist) {
+      info.persisted = await navigator.storage.persist()
+      emitInfo()
+    }
+  } catch {
+    /* 忽略 */
+  }
+}
+
+let timer: ReturnType<typeof setTimeout> | null = null
+let writing = false
+let pending = false
+
+function schedulePersist() {
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(() => {
+    timer = null
+    void persist()
+  }, 120)
+}
+
+async function persist() {
+  const data = state
+  info.chars = JSON.stringify(data).length
+
+  if (info.mode === 'idb') {
+    if (writing) {
+      pending = true
+      return
+    }
+    writing = true
+    const ok = await idbSet(IDB_KEY, data)
+    writing = false
+    if (!ok) {
+      info.mode = 'local'
+      info.error = '数据库写入失败，已切回缓存模式，请尽快导出备份'
+    }
+    if (pending) {
+      pending = false
+      void persist()
+    } else {
+      info.savedAt = Date.now()
+      emitInfo()
+    }
+    return
+  }
+
+  try {
+    localStorage.setItem(KEY, JSON.stringify(data))
+    info.error = ''
+  } catch {
+    info.error = '手机存储已满，最新改动没能存下来，请立即导出备份'
+  }
+  info.savedAt = Date.now()
+  emitInfo()
+}
+
+/** 立即落盘（切后台、关页面前调用，避免丢掉最后几下操作） */
+export function flush() {
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
+  }
+  void persist()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flush)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush()
+  })
+}
 
 function commit(next: DB) {
   state = next
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next))
-  } catch {
-    // 存储写满时静默失败，界面仍可继续用
-  }
+  schedulePersist()
   listeners.forEach((fn) => fn())
 }
 
@@ -134,8 +317,18 @@ export function subscribe(fn: () => void) {
   }
 }
 
+export function subscribeInfo(fn: () => void) {
+  infoListeners.add(fn)
+  return () => {
+    infoListeners.delete(fn)
+  }
+}
+
 export const getState = () => state
 export const useDB = () => useSyncExternalStore(subscribe, getState, getState)
+
+export const getInfo = () => info
+export const useStorageInfo = () => useSyncExternalStore(subscribeInfo, getInfo, getInfo)
 
 export function replaceAll(next: DB) {
   commit(migrate(next as unknown as Record<string, unknown>))

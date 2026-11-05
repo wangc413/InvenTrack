@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
-import { getState, replaceAll, resetAll, useDB, type DB } from '../lib/store'
+import { getState, replaceAll, resetAll, useDB, useStorageInfo, type DB } from '../lib/store'
 import { boxVolume } from '../lib/calc'
 import { toast } from '../components/UI'
 
@@ -18,7 +18,9 @@ function download(name: string, content: BlobPart, type: string) {
 
 export default function Me() {
   const db = useDB()
+  const info = useStorageInfo()
   const [qr, setQr] = useState('')
+  const [quota, setQuota] = useState({ usage: 0, quota: 0 })
   const fileRef = useRef<HTMLInputElement>(null)
   const url = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
 
@@ -28,6 +30,21 @@ export default function Me() {
       .then(setQr)
       .catch(() => setQr(''))
   }, [url])
+
+  useEffect(() => {
+    let alive = true
+    try {
+      const p = navigator.storage?.estimate?.()
+      p?.then((e) => {
+        if (alive) setQuota({ usage: e.usage ?? 0, quota: e.quota ?? 0 })
+      }).catch(() => undefined)
+    } catch {
+      /* 忽略 */
+    }
+    return () => {
+      alive = false
+    }
+  }, [info.chars, info.savedAt])
 
   const exportJson = () => {
     download(`发货助手备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(getState(), null, 2), 'application/json')
@@ -84,6 +101,13 @@ export default function Me() {
   }
 
   const dataSize = new Blob([JSON.stringify(getState())]).size
+  const pallets = db.orders.reduce((n, o) => n + o.pallets.length, 0)
+  const perOrder = db.orders.length ? dataSize / db.orders.length : 1400
+  const remain = quota.quota > 0 ? Math.max(0, quota.quota - quota.usage) : 0
+  const remainOrders = quota.quota > 0 ? Math.floor(remain / perOrder) : 0
+  const pct = quota.quota > 0 ? Math.min(100, (quota.usage / quota.quota) * 100) : 0
+  const fmt = (n: number) => n.toLocaleString('zh-CN')
+  const mb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${(n / 1024 ** 2).toFixed(0)} MB`)
 
   return (
     <>
@@ -143,6 +167,54 @@ export default function Me() {
               </div>
               <div className="meta">不可撤销</div>
             </div>
+          </div>
+        </div>
+
+        <div className="sec-title">容量</div>
+        <div className="card card-pad">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="grow">
+              <div className="name">已用 {(dataSize / 1024).toFixed(0)} KB</div>
+              <div className="meta">
+                {info.mode === 'idb' ? '浏览器数据库' : '浏览器缓存（老模式）'}
+                {quota.quota > 0 ? ` · 上限约 ${mb(quota.quota)}` : ' · 上限读取中'}
+              </div>
+            </div>
+            <span className={`tag ${pct > 70 ? 'warn' : 'ok'}`}>{pct > 70 ? '偏满' : '充足'}</span>
+          </div>
+
+          <div className="bar">
+            <i
+              className={pct > 85 ? 'bad' : pct > 70 ? 'warn' : ''}
+              style={{ width: `${pct > 0 ? Math.max(pct, 1.5) : 0}%` }}
+            />
+          </div>
+
+          <div className="stat3">
+            <div>
+              <b>{fmt(db.orders.length)}</b>
+              <span>车次</span>
+            </div>
+            <div>
+              <b>{fmt(pallets)}</b>
+              <span>块拖板</span>
+            </div>
+            <div>
+              <b>{fmt(db.skus.length)}</b>
+              <span>品项</span>
+            </div>
+          </div>
+
+          <div className="meta" style={{ marginTop: 10, lineHeight: 1.7 }}>
+            一车 8 块板约 1.3 KB
+            {quota.quota > 0 ? `，按剩余空间还能再记约 ${fmt(remainOrders)} 车` : ''}。
+            {info.mode === 'idb'
+              ? '数据存在浏览器数据库里，容量按手机剩余空间分配，不再是 5 MB 上限。'
+              : '当前是缓存模式，上限约 5 MB，容量偏紧，请多导出备份。'}
+          </div>
+
+          <div className="meta" style={{ marginTop: 6, lineHeight: 1.7 }}>
+            长期保留：{info.persisted ? '已开启，系统不会主动清理' : '未开启，加个「添加到主屏幕」更容易获批'}
           </div>
         </div>
 
