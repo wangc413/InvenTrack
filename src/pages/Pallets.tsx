@@ -49,12 +49,12 @@ function PalletArt({ segs, empty }: { segs: PalletStat['segments']; empty: strin
             rx={3}
             fill={color.fill}
             stroke={color.stroke}
-            strokeWidth={0.8}
+            strokeWidth={1.1}
           />
         )
       })}
-      <rect x="2" y={top} width={palletW} height={palletH} rx="2" fill="#e3d3bc" stroke="#c2a98a" strokeWidth="0.8" />
-      <rect x="2" y={H - 5} width={palletW} height="3.5" rx="1.5" fill="#c2a98a" />
+      <rect x="2" y={top} width={palletW} height={palletH} rx="2" fill="#b8b5ae" stroke="#7a776f" strokeWidth="1" />
+      <rect x="2" y={H - 5} width={palletW} height="3.5" rx="1.5" fill="#7a776f" />
       {total === 0 && (
         <text x={W / 2} y={top - 14} textAnchor="middle" fontSize="11" fill="#a8a8ad">
           {empty}
@@ -161,7 +161,7 @@ export default function Pallets() {
               <br />
               装完自动算总箱数、体积和装车方案
             </div>
-            <button className="btn" onClick={openCreate}>
+            <button className="btn primary" onClick={openCreate}>
               新建车次
             </button>
           </div>

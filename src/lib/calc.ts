@@ -185,12 +185,12 @@ export function fmt(n: number, digits = 2) {
   return Number.isFinite(n) ? n.toFixed(digits).replace(/\.?0+$/, '') : '0'
 }
 
-/** 拖板配色，按品项顺序循环 */
+/** 拖板配色，按品项顺序循环。黑白灰阶，靠明度区分同一块板上的不同品项 */
 export const PALLET_COLORS = [
-  { fill: '#d6e9ff', stroke: '#0a84ff' },
-  { fill: '#d1f5de', stroke: '#34c759' },
-  { fill: '#ffe8cc', stroke: '#ff9500' },
-  { fill: '#e5deff', stroke: '#5e5ce6' },
-  { fill: '#ffd9e2', stroke: '#ff2d55' },
-  { fill: '#d7f0ee', stroke: '#30b0c7' },
+  { fill: '#d2d4d8', stroke: '#6f6f76' },
+  { fill: '#bfc2c8', stroke: '#64646b' },
+  { fill: '#acb0b7', stroke: '#5a5a61' },
+  { fill: '#c8cbd0', stroke: '#73737a' },
+  { fill: '#b5b9bf', stroke: '#616168' },
+  { fill: '#a2a6ae', stroke: '#55555c' },
 ]

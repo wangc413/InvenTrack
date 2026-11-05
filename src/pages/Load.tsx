@@ -130,7 +130,7 @@ export default function Load() {
                     borderColor: 'transparent',
                   }}
                 >
-                  <div style={{ fontSize: 15, fontWeight: 600, color: plan.overVolume || plan.overWeight ? 'var(--danger)' : 'var(--ok)' }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: plan.overVolume || plan.overWeight ? 'var(--danger)' : 'var(--text)' }}>
                     {plan.overVolume || plan.overWeight
                       ? plan.overWeight && !plan.overVolume
                         ? '超重，需要分车'
@@ -172,7 +172,7 @@ export default function Load() {
                     <div className="card card-pad">
                       <div className="panel dashed">
                         <svg viewBox={`0 0 ${truck.L} ${truck.W}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-                          <rect x="0" y="0" width={truck.L} height={truck.W} fill="#eef1f5" stroke="#9aa1ab" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+                          <rect x="0" y="0" width={truck.L} height={truck.W} fill="#f4f4f6" stroke="#a0a0a6" strokeWidth="3" vectorEffect="non-scaling-stroke" />
                           {Array.from({ length: grid.nb }).map((_, j) =>
                             Array.from({ length: grid.na }).map((_, i) => (
                               <rect
@@ -182,8 +182,8 @@ export default function Load() {
                                 width={grid.a - 2}
                                 height={grid.b - 2}
                                 rx={3}
-                                fill={(i + j) % 2 === 0 ? '#c7d7f5' : '#dbe6fa'}
-                                stroke="#2563eb"
+                                fill={(i + j) % 2 === 0 ? '#cfd1d6' : '#e0e1e4'}
+                                stroke="#6f6f76"
                                 strokeWidth="1"
                                 vectorEffect="non-scaling-stroke"
                               />

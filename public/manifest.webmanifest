@@ -1,7 +1,7 @@
 {
   "name": "发货助手",
   "short_name": "发货助手",
-  "description": "扫码计件、自动换箱、发货单与装车方案",
+  "description": "按拖板记录装车、库存流水、发货单与装车方案",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -11,15 +11,21 @@
   "lang": "zh-CN",
   "icons": [
     {
-      "src": "./favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ]
