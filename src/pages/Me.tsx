@@ -172,10 +172,10 @@ export default function Me() {
 
         <div className="sec-title">容量</div>
         <div className="card card-pad">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="grow">
-              <div className="name">已用 {(dataSize / 1024).toFixed(0)} KB</div>
-              <div className="meta">
+          <div className="cap-head">
+            <div className="cap-main">
+              <div className="cap-title">已用 {(dataSize / 1024).toFixed(0)} KB</div>
+              <div className="cap-sub">
                 {info.mode === 'idb' ? '浏览器数据库' : '浏览器缓存（老模式）'}
                 {quota.quota > 0 ? ` · 上限约 ${mb(quota.quota)}` : ' · 上限读取中'}
               </div>
@@ -205,7 +205,7 @@ export default function Me() {
             </div>
           </div>
 
-          <div className="meta" style={{ marginTop: 10, lineHeight: 1.7 }}>
+          <div className="cap-sub" style={{ marginTop: 10 }}>
             一车 8 块板约 1.3 KB
             {quota.quota > 0 ? `，按剩余空间还能再记约 ${fmt(remainOrders)} 车` : ''}。
             {info.mode === 'idb'
@@ -213,7 +213,7 @@ export default function Me() {
               : '当前是缓存模式，上限约 5 MB，容量偏紧，请多导出备份。'}
           </div>
 
-          <div className="meta" style={{ marginTop: 6, lineHeight: 1.7 }}>
+          <div className="cap-sub" style={{ marginTop: 6 }}>
             长期保留：{info.persisted ? '已开启，系统不会主动清理' : '未开启，加个「添加到主屏幕」更容易获批'}
           </div>
         </div>

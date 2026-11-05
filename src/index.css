@@ -756,3 +756,25 @@ textarea.input {
   font-size: 11px;
   color: var(--sub);
 }
+
+/* ---------- 容量卡片 ---------- */
+.cap-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cap-main {
+  flex: 1;
+  min-width: 0;
+}
+.cap-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cap-sub {
+  font-size: 12px;
+  color: var(--sub);
+  margin-top: 3px;
+  line-height: 1.6;
+}
