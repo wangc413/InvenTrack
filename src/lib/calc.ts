@@ -187,10 +187,10 @@ export function fmt(n: number, digits = 2) {
 
 /** 拖板配色，按品项顺序循环 */
 export const PALLET_COLORS = [
-  { fill: '#c7d7f5', stroke: '#2563eb' },
-  { fill: '#a9e3cd', stroke: '#0f6e56' },
-  { fill: '#f7cfae', stroke: '#b45309' },
-  { fill: '#d6ccf7', stroke: '#5b46b8' },
-  { fill: '#f5c2ce', stroke: '#a32d5e' },
-  { fill: '#cfe3a8', stroke: '#4d7c0f' },
+  { fill: '#d6e9ff', stroke: '#0a84ff' },
+  { fill: '#d1f5de', stroke: '#34c759' },
+  { fill: '#ffe8cc', stroke: '#ff9500' },
+  { fill: '#e5deff', stroke: '#5e5ce6' },
+  { fill: '#ffd9e2', stroke: '#ff2d55' },
+  { fill: '#d7f0ee', stroke: '#30b0c7' },
 ]

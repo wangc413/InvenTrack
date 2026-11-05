@@ -23,6 +23,8 @@ function PalletArt({ segs, empty }: { segs: PalletStat['segments']; empty: strin
   const cellH = Math.min(26, 138 / rows)
   const gap = 2.5
   const W = PER_ROW * cellW + 8
+  const colsUsed = Math.min(PER_ROW, Math.max(1, total))
+  const palletW = colsUsed * cellW + 4
   const palletH = 11
   const H = rows * cellH + palletH + 8
   const top = H - palletH - 5
@@ -44,17 +46,17 @@ function PalletArt({ segs, empty }: { segs: PalletStat['segments']; empty: strin
             y={top - (row + 1) * cellH + gap / 2}
             width={cellW - gap}
             height={cellH - gap}
-            rx={2}
+            rx={3}
             fill={color.fill}
             stroke={color.stroke}
             strokeWidth={0.8}
           />
         )
       })}
-      <rect x="2" y={top} width={W - 4} height={palletH} rx="2" fill="#d7bb95" stroke="#a8875f" strokeWidth="0.8" />
-      <rect x="2" y={H - 5} width={W - 4} height="3.5" rx="1.5" fill="#a8875f" />
+      <rect x="2" y={top} width={palletW} height={palletH} rx="2" fill="#e3d3bc" stroke="#c2a98a" strokeWidth="0.8" />
+      <rect x="2" y={H - 5} width={palletW} height="3.5" rx="1.5" fill="#c2a98a" />
       {total === 0 && (
-        <text x={W / 2} y={top - 14} textAnchor="middle" fontSize="11" fill="#9aa1ab">
+        <text x={W / 2} y={top - 14} textAnchor="middle" fontSize="11" fill="#a8a8ad">
           {empty}
         </text>
       )}
@@ -149,17 +151,17 @@ export default function Pallets() {
 
       <main className="page">
         {!draft ? (
-          <div className="card card-pad" style={{ textAlign: 'center', paddingTop: 32, paddingBottom: 28 }}>
-            <div style={{ color: 'var(--primary)', marginBottom: 12 }}>
-              <Icon name="pallet" size={44} />
+          <div className="card empty-state">
+            <div className="es-icon">
+              <Icon name="pallet" size={38} />
             </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>这一车装了什么？</div>
-            <div style={{ fontSize: 13, color: 'var(--sub)', lineHeight: 1.7, marginBottom: 18 }}>
+            <div className="es-title">这一车装了什么？</div>
+            <div className="es-body">
               建一个车次，然后一块拖板一块拖板地录
               <br />
               装完自动算总箱数、体积和装车方案
             </div>
-            <button className="btn primary" onClick={openCreate}>
+            <button className="btn" onClick={openCreate}>
               新建车次
             </button>
           </div>
@@ -233,7 +235,7 @@ export default function Pallets() {
             )}
 
             <button className="btn" style={{ marginTop: 14 }} onClick={newPallet}>
-              ＋ 加一块拖板
+              + 加一块拖板
             </button>
 
             <div style={{ marginTop: 12 }}>
@@ -351,7 +353,7 @@ export default function Pallets() {
 
             {!picker && (
               <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setPicker(true)}>
-                ＋ 添加品项
+                + 添加品项
               </button>
             )}
 

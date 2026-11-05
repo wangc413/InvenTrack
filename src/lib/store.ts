@@ -295,14 +295,17 @@ export async function initStore() {
   listeners.forEach((fn) => fn())
 
   // 申请“长期保留”，降低被浏览器当缓存清掉的可能（Chrome 静默同意，Safari 不支持）
-  try {
-    if (navigator.storage?.persist) {
-      info.persisted = await navigator.storage.persist()
-      emitInfo()
+  // 注意：不能 await，某些浏览器会弹权限提示，会卡住首屏渲染
+  void (async () => {
+    try {
+      if (navigator.storage?.persist) {
+        info.persisted = await navigator.storage.persist()
+        emitInfo()
+      }
+    } catch {
+      /* 忽略 */
     }
-  } catch {
-    /* 忽略 */
-  }
+  })()
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null

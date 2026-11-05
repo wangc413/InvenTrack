@@ -141,12 +141,12 @@ export default function Me() {
 
       <main className="page">
         <div className="card card-pad" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>扫这个码，别人就能试用</div>
-          <div style={{ fontSize: 12, color: 'var(--sub)', marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.3px', marginBottom: 5 }}>扫这个码，别人就能试用</div>
+          <div style={{ fontSize: 13, color: 'var(--sub)', marginBottom: 16 }}>
             打开后点「添加到主屏幕」，和 App 一样用
           </div>
           {qr ? (
-            <img src={qr} alt="试用二维码" style={{ width: 190, height: 190, display: 'block', margin: '0 auto', borderRadius: 8 }} />
+            <img src={qr} alt="试用二维码" style={{ width: 176, height: 176, display: 'block', margin: '0 auto', borderRadius: 6 }} />
           ) : (
             <div className="empty" style={{ padding: 20 }}>
               二维码生成中
@@ -154,7 +154,7 @@ export default function Me() {
           )}
           <div
             className="num"
-            style={{ fontSize: 12, color: 'var(--sub)', marginTop: 12, wordBreak: 'break-all', lineHeight: 1.6 }}
+            style={{ fontSize: 12, color: 'var(--faint)', marginTop: 14, wordBreak: 'break-all', lineHeight: 1.6 }}
           >
             {url}
           </div>

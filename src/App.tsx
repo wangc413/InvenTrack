@@ -17,8 +17,19 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key']
 
+/** 支持 ?tab=stock 这样的深链，方便直接把某一页发给别人 */
+function initialTab(): TabKey {
+  try {
+    const p = new URLSearchParams(window.location.search).get('tab')
+    if (p && TABS.some((t) => t.key === p)) return p as TabKey
+  } catch {
+    /* 忽略 */
+  }
+  return 'pallet'
+}
+
 export default function App() {
-  const [tab, setTab] = useState<TabKey>('pallet')
+  const [tab, setTab] = useState<TabKey>(initialTab)
   const info = useStorageInfo()
 
   return (

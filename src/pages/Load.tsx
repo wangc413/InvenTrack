@@ -170,7 +170,7 @@ export default function Load() {
                   <>
                     <div className="sec-title">第一层铺法（俯视）</div>
                     <div className="card card-pad">
-                      <div style={{ background: '#fbfcfd', border: '1px dashed #c9ced6', borderRadius: 10, padding: 10 }}>
+                      <div className="panel dashed">
                         <svg viewBox={`0 0 ${truck.L} ${truck.W}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
                           <rect x="0" y="0" width={truck.L} height={truck.W} fill="#eef1f5" stroke="#9aa1ab" strokeWidth="3" vectorEffect="non-scaling-stroke" />
                           {Array.from({ length: grid.nb }).map((_, j) =>

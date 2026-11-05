@@ -148,7 +148,7 @@ export default function Stock() {
                   </div>
 
                   {open && (
-                    <div style={{ background: '#fafbfc', borderTop: '1px solid var(--line)', padding: '10px 14px 14px' }}>
+                    <div className="panel">
                       <div className="sub-label">批次（按入库先后，发车时先进先出）</div>
                       {batches.length === 0 ? (
                         <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 10px' }}>没有余量批次</div>
@@ -156,26 +156,24 @@ export default function Stock() {
                         batches.map(({ batch, left: bLeft }) => (
                           <div
                             key={batch.id}
+                            className="thumb-row"
                             onClick={() => openSheet('adjust', sku, batch.id)}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8,
-                              padding: '9px 0',
-                              borderBottom: '1px dashed var(--line)',
-                              fontSize: 13,
-                            }}
                           >
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 500 }}>{batch.batchNo}</div>
-                              <div style={{ color: 'var(--sub)', fontSize: 12 }}>
+                            <div className="tr-main">
+                              <div className="tr-line">
+                                <span className="tr-title">{batch.batchNo}</span>
+                                <span
+                                  className="tr-num"
+                                  style={{ color: bLeft > 0 ? 'var(--text)' : 'var(--danger)' }}
+                                >
+                                  {bLeft} 件
+                                </span>
+                              </div>
+                              <div className="tr-meta">
                                 生产 {batch.prodDate || '—'} · 入库 {batch.qty} 件
                               </div>
                             </div>
-                            <div className="num" style={{ fontWeight: 600, color: bLeft > 0 ? 'var(--text)' : 'var(--danger)' }}>
-                              {bLeft} 件
-                            </div>
-                            <div style={{ display: 'flex', gap: 6 }}>
+                            <div className="tr-actions">
                               <button
                                 className="btn sm"
                                 onClick={(e) => {
@@ -206,33 +204,13 @@ export default function Stock() {
                         <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 2px' }}>还没有流水</div>
                       ) : (
                         moves.map((m) => (
-                          <div
-                            key={m.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8,
-                              fontSize: 12,
-                              color: 'var(--sub)',
-                              padding: '5px 0',
-                            }}
-                          >
-                            <span style={{ width: 84, flex: '0 0 auto' }}>{fmtTime(m.at)}</span>
-                            <span style={{ width: 34, flex: '0 0 auto' }}>{TYPE_LABEL[m.type] ?? m.type}</span>
-                            <span
-                              className="num"
-                              style={{
-                                width: 56,
-                                flex: '0 0 auto',
-                                fontWeight: 600,
-                                color: m.qty > 0 ? 'var(--ok)' : 'var(--text)',
-                              }}
-                            >
+                          <div key={m.id} className="flow-row">
+                            <span>{fmtTime(m.at)}</span>
+                            <span>{TYPE_LABEL[m.type] ?? m.type}</span>
+                            <span className={`flow-qty ${m.qty > 0 ? 'plus' : ''}`}>
                               {m.qty > 0 ? `+${m.qty}` : m.qty}
                             </span>
-                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {m.ref}
-                            </span>
+                            <span className="flow-ref">{m.ref}</span>
                           </div>
                         ))
                       )}
