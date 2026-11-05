@@ -613,6 +613,16 @@ export function saveCustomer(name: string) {
   return id
 }
 
+export function updateCustomer(id: string, name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return false
+  commit({
+    ...state,
+    customers: state.customers.map((c) => (c.id === id ? { ...c, name: trimmed, short: trimmed } : c)),
+  })
+  return true
+}
+
 export function removeCustomer(id: string) {
   if (state.skus.some((s) => s.customerId === id)) return false
   commit({ ...state, customers: state.customers.filter((c) => c.id !== id) })
