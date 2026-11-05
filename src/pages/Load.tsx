@@ -1,259 +1,472 @@
-import { useState } from 'react'
-import { saveTruck, unshipOrder, useDB, type Truck } from '../lib/store'
-import { fmt, planTruck, summarize } from '../lib/calc'
-import { Sheet, toast } from '../components/UI'
+import { useMemo, useState, type ReactNode } from 'react'
+import Box3D from '../components/Box3D'
+import { Icon, Sheet, Stepper, toast } from '../components/UI'
+import { fmt, fmtDate, summarize } from '../lib/calc'
+import {
+  DEFAULT_LAYERS,
+  DEFAULT_PER_LAYER,
+  addPallet,
+  createOrder,
+  customerById,
+  palletBoxes,
+  removeOrder,
+  removePallet,
+  shipOrder,
+  shortages,
+  skusOfCustomer,
+  stockByDate,
+  updatePallet,
+  useDB,
+  type Order,
+  type Pallet,
+  type Sku,
+} from '../lib/store'
 
-function gridOf(truck: Truck, l: number, w: number) {
-  let best = { na: 0, nb: 0, a: l, b: w }
-  for (const [a, b] of [
-    [l, w],
-    [w, l],
-  ]) {
-    const na = Math.floor(truck.L / a)
-    const nb = Math.floor(truck.W / b)
-    if (na * nb > best.na * best.nb) best = { na, nb, a, b }
+export type PalletSpec3D = { no: string; sku: Sku; layers: number; perLayer: number; topCount: number }
+
+/** 从车次算出 3D 预览需要的规格 */
+export function specOfOrder(db: ReturnType<typeof useDB>, order: Order): PalletSpec3D[] {
+  const out: PalletSpec3D[] = []
+  for (const p of order.pallets) {
+    const sku = db.skus.find((s) => s.id === p.skuId)
+    if (!sku) continue
+    out.push({ no: p.no, sku, layers: p.layers, perLayer: p.perLayer, topCount: p.topCount })
   }
-  return best
+  return out
 }
+
+/* ---------- 新建车次 ---------- */
+
+function NewOrderSheet({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (id: string) => void
+}) {
+  const db = useDB()
+  const [destination, setDestination] = useState('')
+  const [customerId, setCustomerId] = useState(db.customers[0]?.id ?? '')
+
+  return (
+    <Sheet open={open} title="新建车次" onClose={onClose}>
+      <label className="field-label">送到哪</label>
+      <input
+        className="input"
+        value={destination}
+        onChange={(e) => setDestination(e.target.value)}
+        placeholder="门店名或收货地址"
+        autoFocus
+      />
+
+      <label className="field-label" style={{ marginTop: 18 }}>
+        送给谁
+      </label>
+      <div className="chips">
+        {db.customers.map((c) => (
+          <button key={c.id} className={`chip ${customerId === c.id ? 'on' : ''}`} onClick={() => setCustomerId(c.id)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+
+      <button
+        className="btn primary"
+        style={{ marginTop: 24 }}
+        onClick={() => {
+          if (!destination.trim()) return toast('先填收货地')
+          const id = createOrder({ destination, customerId })
+          setDestination('')
+          onCreated(id)
+          onClose()
+        }}
+      >
+        创建车次
+      </button>
+    </Sheet>
+  )
+}
+
+/* ---------- 加 / 改一块拖板 ---------- */
+
+function PalletSheet({
+  open,
+  order,
+  editing,
+  onClose,
+}: {
+  open: boolean
+  order: Order
+  editing: Pallet | null
+  onClose: () => void
+}) {
+  const db = useDB()
+  const skus = skusOfCustomer(db, order.customerId)
+
+  const [skuId, setSkuId] = useState(editing?.skuId ?? '')
+  const [prodDate, setProdDate] = useState(editing?.prodDate ?? '')
+  const [layers, setLayers] = useState(editing?.layers ?? DEFAULT_LAYERS)
+  const [perLayer, setPerLayer] = useState(editing?.perLayer ?? DEFAULT_PER_LAYER)
+  const [topCount, setTopCount] = useState(editing?.topCount ?? DEFAULT_PER_LAYER)
+
+  const sku = skus.find((s) => s.id === skuId)
+  const dates = sku ? stockByDate(db, sku.id) : []
+  const top = Math.min(topCount, perLayer)
+  const boxes = Math.max(0, (layers - 1) * perLayer + top)
+  const qty = sku ? boxes * sku.perBox : 0
+  const picked = dates.find((d) => d.prodDate === prodDate)
+
+  const pickSku = (id: string) => {
+    setSkuId(id)
+    setProdDate(stockByDate(db, id)[0]?.prodDate ?? '')
+  }
+
+  const save = () => {
+    if (!sku) return toast('先选一个品')
+    if (!prodDate) return toast('这个品还没有库存')
+    const payload = { skuId, prodDate, layers, perLayer, topCount: top }
+    if (editing) updatePallet(order.id, editing.id, payload)
+    else addPallet(order.id, payload)
+    onClose()
+    toast(editing ? '已更新拖板' : '已加到车上')
+  }
+
+  return (
+    <Sheet open={open} title={editing ? `编辑 ${editing.no}` : '加一块拖板'} onClose={onClose}>
+      {!editing && (
+        <>
+          <label className="field-label">装什么</label>
+          <div className="pick-list">
+            {skus.map((s) => {
+              const left = stockByDate(db, s.id).reduce((sum, d) => sum + d.left, 0)
+              return (
+                <button key={s.id} className={`pick-row ${skuId === s.id ? 'on' : ''}`} onClick={() => pickSku(s.id)}>
+                  <span className="pick-swatch" style={{ background: s.accentColor }} />
+                  <span className="pick-main">
+                    <span className="pick-name">{s.shortName}</span>
+                    <span className="pick-spec">{s.spec}</span>
+                  </span>
+                  <span className={`pick-stock ${left > 0 ? '' : 'none'}`}>{left > 0 ? `${left} 件` : '无库存'}</span>
+                </button>
+              )
+            })}
+            {skus.length === 0 && <div className="hint">这个客户还没有建档的品项，先去「档案」加一个</div>}
+          </div>
+        </>
+      )}
+
+      {editing && sku && (
+        <div className="edit-head">
+          <span className="pick-swatch" style={{ background: sku.accentColor }} />
+          <span>
+            <b>{sku.shortName}</b>
+            <em>{sku.spec}</em>
+          </span>
+        </div>
+      )}
+
+      {sku && (
+        <>
+          <label className="field-label" style={{ marginTop: 18 }}>
+            生产日期
+          </label>
+          {dates.length > 0 ? (
+            <div className="chips">
+              {dates.map((d) => (
+                <button
+                  key={d.prodDate}
+                  className={`chip ${prodDate === d.prodDate ? 'on' : ''}`}
+                  onClick={() => setProdDate(d.prodDate)}
+                >
+                  {fmtDate(d.prodDate)}
+                  <em>{d.left}</em>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="hint">这个品还没有库存，先去「库存」入库</div>
+          )}
+
+          <div className="stack-box">
+            <div className="stack-row">
+              <span>层数</span>
+              <Stepper value={layers} onChange={(v) => setLayers(Math.max(1, Math.min(20, v)))} min={1} />
+            </div>
+            <div className="stack-row">
+              <span>每层几个</span>
+              <Stepper
+                value={perLayer}
+                onChange={(v) => {
+                  const n = Math.max(1, Math.min(20, v))
+                  setPerLayer(n)
+                  setTopCount((t) => Math.min(t, n))
+                }}
+                min={1}
+              />
+            </div>
+            <div className="stack-row">
+              <span>顶层几个</span>
+              <Stepper value={top} onChange={(v) => setTopCount(Math.max(0, Math.min(perLayer, v)))} min={0} />
+            </div>
+          </div>
+
+          <div className="stack-sum">
+            <div>
+              <b>{boxes}</b>
+              <span>箱</span>
+            </div>
+            <div>
+              <b>{qty}</b>
+              <span>件</span>
+            </div>
+            <div>
+              <b>{picked ? picked.left - qty : 0}</b>
+              <span>该日期剩余</span>
+            </div>
+          </div>
+
+          {picked && picked.left < qty && (
+            <div className="alert" style={{ margin: '10px 0 0' }}>
+              这个日期只有 {picked.left} 件，装完会超出 {qty - picked.left} 件
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="sheet-actions">
+        <button className="btn primary" onClick={save} disabled={!sku || !prodDate}>
+          {editing ? '保存' : '加到车上'}
+        </button>
+      </div>
+    </Sheet>
+  )
+}
+
+/* ---------- 3D 全屏 ---------- */
+
+export function Viewer3D({
+  open,
+  order,
+  onClose,
+  actions,
+}: {
+  open: boolean
+  order: Order | null
+  onClose: () => void
+  actions?: ReactNode
+}) {
+  const db = useDB()
+  if (!open || !order) return null
+  const spec = specOfOrder(db, order)
+  const sum = summarize(db, order)
+  const customer = customerById(db, order.customerId)
+
+  return (
+    <div className="viewer">
+      <div className="viewer-top">
+        <button className="icon-btn" onClick={onClose} aria-label="关闭">
+          <Icon name="back" size={22} />
+        </button>
+        <div className="viewer-title">
+          <b>{order.destination}</b>
+          <em>
+            {customer?.name ?? '—'} · {sum.totalPallets} 板 · {sum.totalBoxes} 箱
+          </em>
+        </div>
+      </div>
+      <Box3D pallets={spec} />
+      <div className="viewer-info">
+        {sum.lines.slice(0, 4).map((l) => (
+          <div key={`${l.sku.id}-${l.prodDate}`}>
+            <span>{l.sku.shortName}</span>
+            <em>{fmtDate(l.prodDate)}</em>
+            <b>{l.boxes} 箱</b>
+          </div>
+        ))}
+        <div className="viewer-total">
+          <span>合计</span>
+          <em>{fmt(sum.totalVolume, 2)} m³</em>
+          <b>{sum.totalQty} 件</b>
+        </div>
+        {actions && <div className="viewer-actions">{actions}</div>}
+      </div>
+    </div>
+  )
+}
+
+/* ---------- 页面 ---------- */
 
 export default function Load() {
   const db = useDB()
-  // 只列未发车的单 + 最近 15 条已发车单：数据攒到几千条时也不会一次渲染上千个按钮
-  const all = db.orders.filter((o) => o.pallets.some((p) => p.items.length > 0))
-  const orders = [...all.filter((o) => o.status === 'draft'), ...all.filter((o) => o.status === 'shipped').slice(0, 15)]
-  const truncated = all.length > orders.length
-  const [pickedId, setPickedId] = useState('')
-  const [editing, setEditing] = useState(false)
+  const draft = useMemo(() => db.orders.find((o) => o.status === 'draft') ?? null, [db.orders])
 
-  const truck = db.trucks[0]
-  const order = orders.find((o) => o.id === pickedId) ?? orders[0]
-  const sum = order ? summarize(db, order) : null
-  const plan = sum && truck ? planTruck(truck, sum) : null
-  const dominant = plan?.layout[0]
+  const [creating, setCreating] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [editing, setEditing] = useState<Pallet | null>(null)
+  const [viewerOpen, setViewerOpen] = useState(false)
+  /** 刚发完车的单：单据已经不是草稿了，但 3D 要接着展示 */
+  const [shippedPreview, setShippedPreview] = useState<Order | null>(null)
 
-  const [form, setForm] = useState({ L: 420, W: 200, H: 220, maxWeight: 2000, name: '4.2米厢货' })
+  const sum = draft ? summarize(db, draft) : null
 
-  const openEdit = () => {
-    if (truck) setForm({ L: truck.L, W: truck.W, H: truck.H, maxWeight: truck.maxWeight, name: truck.name })
-    setEditing(true)
+  const confirmShip = () => {
+    if (!draft) return
+    if (draft.pallets.length === 0) return toast('车上还没有货')
+    const short = shortages(db, draft)
+    if (short.length > 0) {
+      const msg = short
+        .slice(0, 3)
+        .map((s) => `${s.sku.shortName} ${fmtDate(s.prodDate)} 差 ${s.short} 件`)
+        .join('\n')
+      if (!confirm(`这些货不够：\n${msg}\n\n仍然发车？缺口会记成超发。`)) return
+    }
+    shipOrder(draft.id)
+    setShippedPreview({ ...draft, status: 'shipped' })
+    toast('已发车')
+    setViewerOpen(true)
   }
 
-  const saveNow = () => {
-    if (!form.L || !form.W || !form.H) return toast('车厢尺寸不能为空')
-    saveTruck({ ...form, id: truck?.id })
-    setEditing(false)
-    toast('车厢参数已保存')
+  if (!draft) {
+    return (
+      <>
+        <div className="page">
+          <header className="topbar">
+            <h1>装车</h1>
+            <p className="sub">一板一种货，装完看 3D</p>
+          </header>
+          <div className="card card-pad">
+            <div className="empty-state">
+              <div className="es-icon">
+                <Icon name="pallet" size={38} />
+              </div>
+              <div className="es-title">今天要发哪一车？</div>
+              <div className="es-body">
+                填收货地、选客户，然后一块板一块板往里装
+                <br />
+                每块板只放一种商品、一个生产日期
+              </div>
+              <button className="btn primary" onClick={() => setCreating(true)}>
+                新建车次
+              </button>
+            </div>
+          </div>
+        </div>
+        <NewOrderSheet open={creating} onClose={() => setCreating(false)} onCreated={() => toast('车次已建好')} />
+        <Viewer3D
+          open={viewerOpen}
+          order={shippedPreview}
+          onClose={() => {
+            setViewerOpen(false)
+            setShippedPreview(null)
+          }}
+        />
+      </>
+    )
   }
 
-  const grid = truck && dominant ? gridOf(truck, dominant.boxL, dominant.boxW) : null
+  const customer = customerById(db, draft.customerId)
 
   return (
     <>
-      <header className="topbar">
-        <div style={{ flex: 1 }}>
-          <h1>装车方案</h1>
-          <div className="sub">{truck ? `${truck.name} · ${truck.L}×${truck.W}×${truck.H}cm` : '还没设置车厢'}</div>
-        </div>
-        <button className="icon-btn" onClick={openEdit} aria-label="设置车厢">
-          ⚙
-        </button>
-      </header>
+      <div className="page with-dock">
+        <header className="topbar">
+          <h1>{draft.destination}</h1>
+          <p className="sub">
+            {customer?.name ?? '—'} · {draft.no}
+          </p>
+          <button
+            className="icon-btn"
+            aria-label="删除车次"
+            onClick={() => {
+              if (confirm('删掉这趟车？已装的货不会动库存')) {
+                removeOrder(draft.id)
+                toast('已删除车次')
+              }
+            }}
+          >
+            <Icon name="trash" size={20} />
+          </button>
+        </header>
 
-      <main className="page">
-        {orders.length === 0 ? (
-          <div className="empty">
-            还没有可装车的单
-            <br />
-            先去「发货」加几件货
-          </div>
-        ) : (
-          <>
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10 }}>
-              {orders.map((o) => (
-                <button
-                  key={o.id}
-                  className={`btn sm ${o.id === order?.id ? 'primary' : ''}`}
-                  style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
-                  onClick={() => setPickedId(o.id)}
-                >
-                  {o.customer}
-                </button>
-              ))}
-              {truncated && (
-                <span className="meta" style={{ alignSelf: 'center', whiteSpace: 'nowrap' }}>
-                  仅显示未发车 + 最近 15 单
-                </span>
-              )}
+        {sum && (
+          <div className="stat-cards">
+            <div>
+              <b>{sum.totalPallets}</b>
+              <span>拖板</span>
             </div>
+            <div>
+              <b>{sum.totalBoxes}</b>
+              <span>箱</span>
+            </div>
+            <div>
+              <b>{fmt(sum.totalVolume, 2)}</b>
+              <span>体积 m³</span>
+            </div>
+          </div>
+        )}
 
-            {sum && plan && (
-              <>
-                <div className="card card-pad">
-                  <div className="kv">
-                    <span className="k">总件数 / 箱数</span>
-                    <span className="v num">
-                      {sum.totalQty} 件 · {sum.totalBoxes} 箱
-                    </span>
-                  </div>
-                  <div className="kv">
-                    <span className="k">货物体积</span>
-                    <span className="v num">
-                      {fmt(sum.totalVolume, 2)} m³ / 车厢 {fmt(plan.capacityVolume, 1)} m³
-                    </span>
-                  </div>
-                  <div className="bar">
-                    <i className={plan.volumeRate > 1 ? 'bad' : plan.volumeRate > 0.9 ? 'warn' : ''} style={{ width: `${Math.min(100, plan.volumeRate * 100)}%` }} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 6 }}>
-                    体积利用率 {fmt(plan.volumeRate * 100, 0)}%
-                  </div>
+        <div className="section-head">
+          <span>拖板清单</span>
+          {draft.pallets.length > 0 && (
+            <button className="link-btn" onClick={() => setViewerOpen(true)}>
+              看 3D
+            </button>
+          )}
+        </div>
 
-                  <div className="kv" style={{ marginTop: 10 }}>
-                    <span className="k">总重量</span>
-                    <span className="v num">
-                      {fmt(sum.totalWeight, 0)} kg / 载重 {truck?.maxWeight} kg
-                    </span>
-                  </div>
-                  <div className="bar">
-                    <i className={plan.weightRate > 1 ? 'bad' : plan.weightRate > 0.9 ? 'warn' : ''} style={{ width: `${Math.min(100, plan.weightRate * 100)}%` }} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 6 }}>
-                    重量利用率 {fmt(plan.weightRate * 100, 0)}%
-                  </div>
-                </div>
-
-                <div
-                  className="card card-pad"
-                  style={{
-                    marginTop: 12,
-                    background: plan.overVolume || plan.overWeight ? 'var(--danger-soft)' : 'var(--ok-soft)',
-                    borderColor: 'transparent',
+        {draft.pallets.map((p) => {
+          const sku = db.skus.find((s) => s.id === p.skuId)
+          const boxes = palletBoxes(p)
+          return (
+            <div className="card card-pad pallet-card" key={p.id}>
+              <div className="pallet-head">
+                <span className="pallet-no">{p.no}</span>
+                <span className="pallet-name">{sku?.shortName ?? '品项已删除'}</span>
+                <span className="pallet-boxes">{boxes} 箱</span>
+              </div>
+              <div className="pallet-meta">
+                <span className="dot" style={{ background: sku?.accentColor ?? '#999' }} />
+                {fmtDate(p.prodDate)} · {p.layers} 层 × {p.perLayer}
+                {p.topCount !== p.perLayer ? ` + 顶层 ${p.topCount}` : ''} · {sku ? boxes * sku.perBox : 0} 件
+              </div>
+              <div className="pallet-actions">
+                <button className="btn sm" onClick={() => setEditing(p)}>
+                  改层数
+                </button>
+                <button
+                  className="btn sm"
+                  onClick={() => {
+                    removePallet(draft.id, p.id)
+                    toast(`${p.no} 已移除`)
                   }}
                 >
-                  <div style={{ fontSize: 15, fontWeight: 600, color: plan.overVolume || plan.overWeight ? 'var(--danger)' : 'var(--text)' }}>
-                    {plan.overVolume || plan.overWeight
-                      ? plan.overWeight && !plan.overVolume
-                        ? '超重，需要分车'
-                        : '装不下，需要分车'
-                      : '一车能装完'}
-                  </div>
-                  <div style={{ fontSize: 13, color: 'var(--sub)', marginTop: 6, lineHeight: 1.7 }}>
-                    {dominant
-                      ? `按「${dominant.skuName}」的箱规，每层可摆 ${dominant.perLayer} 箱，最多叠 ${dominant.layers} 层，单车上限 ${dominant.perLayer * dominant.layers} 箱。`
-                      : '暂无箱规数据'}
-                    {plan.trucksNeeded > 1 && ` 本单建议 ${plan.trucksNeeded} 车。`}
-                  </div>
-                </div>
+                  移除
+                </button>
+              </div>
+            </div>
+          )
+        })}
 
-                {order?.status === 'shipped' && (
-                  <div className="card card-pad" style={{ marginTop: 12 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>这单已发车</div>
-                    <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 6, lineHeight: 1.75 }}>
-                      发错货、客户临时取消，都可以撤销。撤销会把扣掉的库存按原批次加回去，单据退回「未发车」，改完能再发一次。
-                    </div>
-                    <button
-                      className="btn sm"
-                      style={{ marginTop: 10, width: '100%' }}
-                      onClick={() => {
-                        if (!order) return
-                        if (!confirm(`撤销 ${order.no}？库存会按原批次回补。`)) return
-                        unshipOrder(order.id)
-                        toast('已撤销，库存已回补')
-                      }}
-                    >
-                      撤销发车 · 库存回补
-                    </button>
-                  </div>
-                )}
-
-                {grid && truck && dominant && (
-                  <>
-                    <div className="sec-title">第一层铺法（俯视）</div>
-                    <div className="card card-pad">
-                      <div className="panel dashed">
-                        <svg viewBox={`0 0 ${truck.L} ${truck.W}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-                          <rect x="0" y="0" width={truck.L} height={truck.W} fill="#f4f4f6" stroke="#a0a0a6" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-                          {Array.from({ length: grid.nb }).map((_, j) =>
-                            Array.from({ length: grid.na }).map((_, i) => (
-                              <rect
-                                key={`${i}-${j}`}
-                                x={i * grid.a + 1}
-                                y={j * grid.b + 1}
-                                width={grid.a - 2}
-                                height={grid.b - 2}
-                                rx={3}
-                                fill={(i + j) % 2 === 0 ? '#cfd1d6' : '#e0e1e4'}
-                                stroke="#6f6f76"
-                                strokeWidth="1"
-                                vectorEffect="non-scaling-stroke"
-                              />
-                            )),
-                          )}
-                        </svg>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--sub)', marginTop: 8 }}>
-                        <span>
-                          车头 → 车尾 {truck.L} cm（{grid.na} 列）
-                        </span>
-                        <span>
-                          宽 {truck.W} cm（{grid.nb} 排）
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 8, lineHeight: 1.7 }}>
-                        每箱 {dominant.boxL}×{dominant.boxW}×{dominant.boxH}cm，本层共 {grid.na * grid.nb} 箱；
-                        叠 {Math.min(dominant.layers, Math.ceil(sum.totalBoxes / (grid.na * grid.nb)))} 层装完。
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div className="sec-title">各品项装车能力</div>
-                <div className="card">
-                  {plan.layout.map((l) => (
-                    <div className="row" key={l.skuName} style={{ alignItems: 'flex-start' }}>
-                      <div className="grow">
-                        <div className="name">{l.skuName}</div>
-                        <div className="meta num">
-                          {l.boxL}×{l.boxW}×{l.boxH}cm · 每层 {l.perLayer} 箱 × {l.layers} 层
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="tag info">单车 {l.capacityPerTruck} 箱</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.7, marginTop: 14, padding: '0 4px' }}>
-                  这里按「同类箱规整层堆码」估算，不考虑混装插空和重心。实际装车以现场为准，超重优先于超体积。
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </main>
-
-      <Sheet open={editing} title="车厢参数" onClose={() => setEditing(false)}>
-        <div className="field">
-          <label>车型名称</label>
-          <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </div>
-        <div className="field">
-          <label>内尺寸 长 × 宽 × 高 (cm)</label>
-          <div className="row-2">
-            <input className="input num" inputMode="decimal" value={form.L} onChange={(e) => setForm({ ...form, L: Number(e.target.value) })} />
-            <input className="input num" inputMode="decimal" value={form.W} onChange={(e) => setForm({ ...form, W: Number(e.target.value) })} />
-            <input className="input num" inputMode="decimal" value={form.H} onChange={(e) => setForm({ ...form, H: Number(e.target.value) })} />
-          </div>
-        </div>
-        <div className="field">
-          <label>额定载重 (kg)</label>
-          <input className="input num" inputMode="numeric" value={form.maxWeight} onChange={(e) => setForm({ ...form, maxWeight: Number(e.target.value) })} />
-        </div>
-        <button className="btn primary" onClick={saveNow}>
-          保存
+        <button className="btn" style={{ marginTop: 12 }} onClick={() => setPicking(true)}>
+          + 加一块拖板
         </button>
-      </Sheet>
+
+        <div style={{ height: 12 }} />
+      </div>
+
+      <div className="dock">
+        <button className="btn primary" onClick={confirmShip} disabled={draft.pallets.length === 0}>
+          确认发车（扣库存）
+        </button>
+      </div>
+
+      <NewOrderSheet open={creating} onClose={() => setCreating(false)} onCreated={() => toast('车次已建好')} />
+      {picking && <PalletSheet open order={draft} editing={null} onClose={() => setPicking(false)} />}
+      {editing && <PalletSheet key={editing.id} open order={draft} editing={editing} onClose={() => setEditing(null)} />}
+
+      <Viewer3D open={viewerOpen} order={draft} onClose={() => setViewerOpen(false)} />
     </>
   )
 }

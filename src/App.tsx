@@ -1,31 +1,41 @@
 import { useState } from 'react'
-import Pallets from './pages/Pallets'
+import Load from './pages/Load'
+import Records from './pages/Records'
 import Stock from './pages/Stock'
 import Catalog from './pages/Catalog'
-import Load from './pages/Load'
 import Me from './pages/Me'
 import { Icon, ToastHost } from './components/UI'
 import { useStorageInfo } from './lib/store'
 
 const TABS = [
-  { key: 'pallet', label: '装板', icon: 'pallet' },
+  { key: 'ship', label: '装车', icon: 'pallet' },
+  { key: 'records', label: '记录', icon: 'records' },
   { key: 'stock', label: '库存', icon: 'stock' },
   { key: 'catalog', label: '档案', icon: 'catalog' },
-  { key: 'load', label: '装车', icon: 'load' },
   { key: 'me', label: '我的', icon: 'me' },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
 
+/** 兼容旧链接里的 ?tab=pallet / ?tab=load */
+const ALIAS: Record<string, TabKey> = {
+  pallet: 'ship',
+  load: 'ship',
+  record: 'records',
+}
+
 /** 支持 ?tab=stock 这样的深链，方便直接把某一页发给别人 */
 function initialTab(): TabKey {
   try {
     const p = new URLSearchParams(window.location.search).get('tab')
-    if (p && TABS.some((t) => t.key === p)) return p as TabKey
+    if (p) {
+      if (ALIAS[p]) return ALIAS[p]
+      if (TABS.some((t) => t.key === p)) return p as TabKey
+    }
   } catch {
     /* 忽略 */
   }
-  return 'pallet'
+  return 'ship'
 }
 
 export default function App() {
@@ -45,10 +55,10 @@ export default function App() {
         </div>
       )}
 
-      {tab === 'pallet' && <Pallets />}
+      {tab === 'ship' && <Load />}
+      {tab === 'records' && <Records />}
       {tab === 'stock' && <Stock />}
       {tab === 'catalog' && <Catalog />}
-      {tab === 'load' && <Load />}
       {tab === 'me' && <Me />}
 
       <nav className="tabbar">

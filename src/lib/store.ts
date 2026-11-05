@@ -1,16 +1,37 @@
 import { useSyncExternalStore } from 'react'
 
+/** 客户 / 收货方：盒马、快乐猴、菜洋洋……可自行增补 */
+export type Customer = {
+  id: string
+  name: string
+  /** 列表里用的短名 */
+  short: string
+}
+
 export type Sku = {
   id: string
   code: string
   name: string
+  /** 归哪个客户 / 渠道 */
+  customerId: string
+  /** 规格，如 640g(8只)×12袋 */
   spec: string
-  unit: string
+  /** 箱面大字 */
+  shortName: string
+  /** 每箱装多少件（袋 / 盒） */
   perBox: number
+  /** 外箱三围，毫米 */
   boxL: number
   boxW: number
   boxH: number
+  /** 单箱毛重，公斤 */
   boxWeight: number
+  /** 箱面牛皮纸底色 */
+  boxColor: string
+  /** 品牌色块 */
+  accentColor: string
+  /** 色块上的字色 */
+  textColor: string
 }
 
 export type Batch = {
@@ -19,6 +40,7 @@ export type Batch = {
   batchNo: string
   /** 入库时的总量，只作记录；实际余量由流水算出 */
   qty: number
+  /** 生产日期 YYYY-MM-DD —— 发货时按这个日期选货 */
   prodDate: string
   createdAt: number
 }
@@ -45,21 +67,28 @@ export type Move = {
   voided?: boolean
 }
 
-/** 一个拖板上某品项放了几箱 */
-export type PalletItem = { skuId: string; boxes: number }
-
-/** 一块拖板 */
+/**
+ * 一块拖板：只放一种商品、一个生产日期。
+ * 堆码按“层”描述：满层数 × 每层箱数 + 顶层箱数。
+ */
 export type Pallet = {
   id: string
   no: string
-  items: PalletItem[]
+  skuId: string
+  prodDate: string
+  layers: number
+  perLayer: number
+  /** 顶层实际放几箱，其余层按 perLayer 放满 */
+  topCount: number
   createdAt: number
 }
 
 export type Order = {
   id: string
   no: string
-  customer: string
+  /** 收货地，必填 */
+  destination: string
+  customerId: string
   remark: string
   createdAt: number
   status: 'draft' | 'shipped'
@@ -76,6 +105,7 @@ export type Truck = {
 }
 
 export type DB = {
+  customers: Customer[]
   skus: Sku[]
   batches: Batch[]
   moves: Move[]
@@ -88,48 +118,171 @@ const KEY = 'inventrack.v1'
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 
+/** 一块拖板折成多少箱 */
+export const palletBoxes = (p: Pallet) =>
+  Math.max(0, (Math.max(1, p.layers) - 1) * Math.max(1, p.perLayer) + Math.max(0, p.topCount))
+
+/** 默认每层 6 箱、7 层 —— 仓库里最常见的一种码法 */
+export const DEFAULT_LAYERS = 7
+export const DEFAULT_PER_LAYER = 6
+
+export const CUSTOMER_HM = 'c-hm'
+export const CUSTOMER_KLH = 'c-klh'
+export const CUSTOMER_CYY = 'c-cyy'
+
 function seed(): DB {
-  const today = new Date().toISOString().slice(0, 10)
   const now = Date.now()
-  const a: Sku = {
-    id: 'demo1', code: '6901234567890', name: '示例·纸箱装A', spec: '500g×12',
-    unit: '箱', perBox: 12, boxL: 40, boxW: 30, boxH: 25, boxWeight: 6.5,
+  const day = (n: number) => {
+    const d = new Date()
+    d.setDate(d.getDate() - n)
+    return d.toISOString().slice(0, 10)
   }
-  const b: Sku = {
-    id: 'demo2', code: '6909876543210', name: '示例·礼盒B', spec: '250g×24',
-    unit: '箱', perBox: 24, boxL: 50, boxW: 35, boxH: 30, boxWeight: 9,
+
+  const customers: Customer[] = [
+    { id: CUSTOMER_HM, name: '盒马', short: '盒马' },
+    { id: CUSTOMER_KLH, name: '快乐猴', short: '快乐猴' },
+    { id: CUSTOMER_CYY, name: '菜洋洋', short: '菜洋洋' },
+  ]
+
+  const mk = (s: Partial<Sku> & Pick<Sku, 'id' | 'name' | 'shortName' | 'spec' | 'customerId'>): Sku => ({
+    code: '',
+    perBox: 12,
+    boxL: 500,
+    boxW: 340,
+    boxH: 200,
+    boxWeight: 8,
+    boxColor: '#d99a5a',
+    accentColor: '#3aa15c',
+    textColor: '#ffffff',
+    ...s,
+  })
+
+  const skus: Sku[] = [
+    mk({
+      id: 'sku-meat',
+      name: '超合算 NB 鲜汁大肉包',
+      shortName: '鲜汁大肉包',
+      spec: '800克(10只)×8袋',
+      customerId: CUSTOMER_HM,
+      perBox: 8,
+      boxL: 500,
+      boxW: 335,
+      boxH: 190,
+      boxWeight: 7.2,
+      accentColor: '#6b2f2a',
+    }),
+    mk({
+      id: 'sku-green',
+      name: '超合算 NB 翡翠香菇青菜包',
+      shortName: '翡翠香菇青菜包',
+      spec: '640克(8只)×12袋',
+      customerId: CUSTOMER_HM,
+      perBox: 12,
+      boxL: 500,
+      boxW: 340,
+      boxH: 200,
+      boxWeight: 8.2,
+      accentColor: '#3aa15c',
+    }),
+    mk({
+      id: 'sku-shaomai',
+      name: '肉松咸蛋黄松仁 纸皮烧麦',
+      shortName: '纸皮烧麦',
+      spec: '240克×36盒',
+      customerId: CUSTOMER_HM,
+      perBox: 36,
+      boxL: 465,
+      boxW: 410,
+      boxH: 235,
+      boxWeight: 9.2,
+      boxColor: '#f5b183',
+      accentColor: '#f08a2a',
+      textColor: '#ffffff',
+    }),
+    mk({
+      id: 'sku-green-klh',
+      name: '翡翠香菇青菜包（快乐猴）',
+      shortName: '翡翠香菇青菜包',
+      spec: '640克(8只)×12袋',
+      customerId: CUSTOMER_KLH,
+      perBox: 12,
+      boxWeight: 8.2,
+      accentColor: '#3aa15c',
+    }),
+    mk({
+      id: 'sku-meat-cyy',
+      name: '鲜汁大肉包（菜洋洋）',
+      shortName: '鲜汁大肉包',
+      spec: '800克(10只)×8袋',
+      customerId: CUSTOMER_CYY,
+      perBox: 8,
+      boxL: 500,
+      boxW: 335,
+      boxH: 190,
+      boxWeight: 7.2,
+      accentColor: '#6b2f2a',
+    }),
+  ]
+
+  const batches: Batch[] = []
+  const moves: Move[] = []
+
+  const stock = (sku: Sku, prodDate: string, qty: number) => {
+    const b: Batch = { id: uid(), skuId: sku.id, batchNo: prodDate.replace(/-/g, ''), qty, prodDate, createdAt: now }
+    batches.push(b)
+    moves.push({ id: uid(), at: now, type: 'in', skuId: sku.id, batchId: b.id, qty, ref: '期初', note: '示例入库' })
   }
-  const ba: Batch = { id: uid(), skuId: a.id, batchNo: 'B20261101', qty: 240, prodDate: today, createdAt: now }
-  const bb: Batch = { id: uid(), skuId: b.id, batchNo: 'B20261028', qty: 120, prodDate: today, createdAt: now }
+
+  const byId = (id: string) => skus.find((s) => s.id === id)!
+
+  stock(byId('sku-meat'), day(4), 120)
+  stock(byId('sku-meat'), day(2), 96)
+  stock(byId('sku-meat'), day(1), 240)
+  stock(byId('sku-green'), day(8), 144)
+  stock(byId('sku-green'), day(3), 180)
+  stock(byId('sku-shaomai'), day(4), 216)
+  stock(byId('sku-green-klh'), day(2), 96)
+  stock(byId('sku-meat-cyy'), day(3), 80)
+
   return {
-    skus: [a, b],
-    batches: [ba, bb],
-    moves: [
-      { id: uid(), at: now, type: 'in', skuId: a.id, batchId: ba.id, qty: 240, ref: '期初', note: '示例入库' },
-      { id: uid(), at: now, type: 'in', skuId: b.id, batchId: bb.id, qty: 120, ref: '期初', note: '示例入库' },
-    ],
+    customers,
+    skus,
+    batches,
+    moves,
     orders: [],
-    trucks: [{ id: uid(), name: '4.2米厢货', L: 420, W: 200, H: 220, maxWeight: 2000 }],
+    trucks: [{ id: uid(), name: '4.2米厢货', L: 4200, W: 2000, H: 2200, maxWeight: 2000 }],
     seq: 1,
   }
 }
 
+type LegacyPallet = { id?: string; no?: string; createdAt?: number; items?: { skuId: string; boxes: number }[] }
+type LegacyOrder = Order & { customer?: string; pallets?: LegacyPallet[] }
+
 function migrate(raw: Record<string, unknown>): DB {
   const base = seed()
-  const data = raw as Partial<DB>
+  const data = raw as Partial<DB> & { orders?: LegacyOrder[] }
 
-  const orders = (data.orders ?? []).map((o) => {
-    const legacy = o as Order & { lines?: { skuId: string; qty: number }[] }
-    const pallets = Array.isArray(legacy.pallets) ? legacy.pallets : []
-    return { ...legacy, pallets } as Order
-  })
+  const customers = Array.isArray(data.customers) && data.customers.length ? data.customers : base.customers
+  const fallbackCustomer = customers[0]?.id ?? CUSTOMER_HM
+
+  // 品项：补齐新字段（客户、箱面配色、箱面大字）
+  const rawSkus = (Array.isArray(data.skus) && data.skus.length ? data.skus : base.skus) as (Sku &
+    Partial<Pick<Sku, 'customerId' | 'shortName' | 'boxColor' | 'accentColor' | 'textColor'>>)[]
+  const skus: Sku[] = rawSkus.map((s) => ({
+    ...s,
+    customerId: s.customerId ?? fallbackCustomer,
+    shortName: s.shortName ?? s.name,
+    boxColor: s.boxColor ?? '#d99a5a',
+    accentColor: s.accentColor ?? '#3aa15c',
+    textColor: s.textColor ?? '#ffffff',
+  }))
 
   // 批次：丢掉旧的 left 字段，余量一律由流水算
   const rawBatches = (Array.isArray(data.batches) ? data.batches : base.batches) as (Batch & { left?: number })[]
   const batches: Batch[] = rawBatches.map((b) => ({
     id: b.id,
     skuId: b.skuId,
-    batchNo: b.batchNo ?? '无批次',
+    batchNo: b.batchNo ?? b.prodDate?.replace(/-/g, '') ?? '无批次',
     qty: Number(b.qty) || 0,
     prodDate: b.prodDate ?? '',
     createdAt: Number(b.createdAt) || Date.now(),
@@ -153,18 +306,62 @@ function migrate(raw: Record<string, unknown>): DB {
       if (used > 0) {
         moves.push({ id: uid(), at, type: 'out', skuId: b.skuId, batchId: b.id, qty: -used, ref: '期初', note: '历史已发' })
       } else if (used < 0) {
-        // 老数据里余量比入库量还多（当时手工加过），补一笔调整把差额补上
         moves.push({ id: uid(), at, type: 'adjust', skuId: b.skuId, batchId: b.id, qty: -used, ref: '期初', note: '历史盘盈' })
       }
     }
   }
 
+  // 单据：旧版一块板上混放多个品项，新版一板一品，按品项拆开
+  const srcOrders = (Array.isArray(data.orders) ? data.orders : []) as LegacyOrder[]
+  const orders: Order[] = srcOrders.map((o) => {
+    const pallets: Pallet[] = []
+    for (const p of o.pallets ?? []) {
+      if ('skuId' in p && p.skuId) {
+        pallets.push(p as Pallet)
+        continue
+      }
+      const legacy = p as LegacyPallet
+      for (const it of legacy.items ?? []) {
+        const batch = batches.find((b) => b.skuId === it.skuId)
+        const boxes = Math.max(1, it.boxes)
+        const layers = Math.ceil(boxes / DEFAULT_PER_LAYER)
+        pallets.push({
+          id: uid(),
+          no: '',
+          skuId: it.skuId,
+          prodDate: batch?.prodDate ?? '',
+          layers,
+          perLayer: DEFAULT_PER_LAYER,
+          topCount: boxes - (layers - 1) * DEFAULT_PER_LAYER,
+          createdAt: Number(p.createdAt) || Date.now(),
+        })
+      }
+    }
+    return {
+      ...o,
+      destination: o.destination || o.customer || '未填收货地',
+      // 旧版只有一个客户名字段，迁移时统一挂到默认客户上
+      customerId: o.customerId || fallbackCustomer,
+      pallets: pallets.map((p, i) => ({ ...p, no: `P${i + 1}` })),
+    } as Order
+  })
+
+  // 车厢：旧数据用厘米，新数据统一用毫米
+  const rawTrucks = data.trucks?.length ? data.trucks : base.trucks
+  const trucks: Truck[] = rawTrucks.map((t) => ({
+    ...t,
+    L: t.L < 100 ? t.L * 10 : t.L,
+    W: t.W < 100 ? t.W * 10 : t.W,
+    H: t.H < 100 ? t.H * 10 : t.H,
+  }))
+
   return {
-    skus: data.skus ?? base.skus,
+    customers,
+    skus,
     batches,
     moves,
     orders,
-    trucks: data.trucks?.length ? data.trucks : base.trucks,
+    trucks,
     seq: data.seq ?? 1,
   }
 }
@@ -310,7 +507,7 @@ export async function initStore() {
 
 let timer: ReturnType<typeof setTimeout> | null = null
 let writing = false
-let pending = false
+let pendingWrite = false
 
 function schedulePersist() {
   if (timer) clearTimeout(timer)
@@ -326,37 +523,37 @@ async function persist() {
 
   if (info.mode === 'idb') {
     if (writing) {
-      pending = true
+      pendingWrite = true
       return
     }
     writing = true
+    info = { ...info, error: '' }
     const ok = await idbSet(IDB_KEY, data)
     writing = false
     if (!ok) {
-      info.mode = 'local'
-      info.error = '数据库写入失败，已切回缓存模式，请尽快导出备份'
-    }
-    if (pending) {
-      pending = false
-      void persist()
-    } else {
-      info.savedAt = Date.now()
+      info = { ...info, error: '写入失败，请立即去「我的」导出备份' }
       emitInfo()
+      return
+    }
+    info.savedAt = Date.now()
+    emitInfo()
+    if (pendingWrite) {
+      pendingWrite = false
+      void persist()
     }
     return
   }
 
   try {
     localStorage.setItem(KEY, JSON.stringify(data))
-    info.error = ''
+    info.savedAt = Date.now()
+    info = { ...info, error: '' }
   } catch {
-    info.error = '手机存储已满，最新改动没能存下来，请立即导出备份'
+    info = { ...info, error: '存储已满，写入失败，请立即去「我的」导出备份' }
   }
-  info.savedAt = Date.now()
   emitInfo()
 }
 
-/** 立即落盘（切后台、关页面前调用，避免丢掉最后几下操作） */
 export function flush() {
   if (timer) {
     clearTimeout(timer)
@@ -406,6 +603,22 @@ export function resetAll() {
   commit(seed())
 }
 
+/* ---------- 客户 ---------- */
+
+export function saveCustomer(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return ''
+  const id = uid()
+  commit({ ...state, customers: [...state.customers, { id, name: trimmed, short: trimmed }] })
+  return id
+}
+
+export function removeCustomer(id: string) {
+  if (state.skus.some((s) => s.customerId === id)) return false
+  commit({ ...state, customers: state.customers.filter((c) => c.id !== id) })
+  return true
+}
+
 /* ---------- 品项 ---------- */
 
 export function saveSku(input: Omit<Sku, 'id'> & { id?: string }) {
@@ -436,12 +649,12 @@ function pushMove(db: DB, move: Omit<Move, 'id' | 'at'> & { at?: number }): Move
 }
 
 /** 入库：建一个批次，同时记一条入账流水 */
-export function addBatch(input: { skuId: string; batchNo: string; qty: number; prodDate: string; note?: string }) {
+export function addBatch(input: { skuId: string; qty: number; prodDate: string; batchNo?: string; note?: string }) {
   if (!(input.qty > 0)) return ''
   const batch: Batch = {
     id: uid(),
     skuId: input.skuId,
-    batchNo: input.batchNo || '无批次',
+    batchNo: input.batchNo || input.prodDate.replace(/-/g, '') || '无批次',
     qty: input.qty,
     prodDate: input.prodDate,
     createdAt: Date.now(),
@@ -508,16 +721,17 @@ export function removeBatch(id: string) {
   })
 }
 
-/* ---------- 车次 / 发货单 ---------- */
+/* ---------- 车次 ---------- */
 
-export function createOrder(customer: string, remark = '') {
+export function createOrder(input: { destination: string; customerId: string; remark?: string }) {
   const d = new Date()
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
   const order: Order = {
     id: uid(),
     no: `FH${ymd}-${String(state.seq).padStart(3, '0')}`,
-    customer: customer || '未填客户',
-    remark,
+    destination: input.destination.trim() || '未填收货地',
+    customerId: input.customerId,
+    remark: input.remark ?? '',
     createdAt: Date.now(),
     status: 'draft',
     pallets: [],
@@ -536,18 +750,32 @@ export function removeOrder(id: string) {
 
 /* ---------- 拖板 ---------- */
 
-export function addPallet(orderId: string) {
-  const pallet: Pallet = { id: uid(), no: '', items: [], createdAt: Date.now() }
+export function addPallet(orderId: string, input: Omit<Pallet, 'id' | 'no' | 'createdAt'>) {
+  const id = uid()
   commit({
     ...state,
     orders: state.orders.map((o) => {
       if (o.id !== orderId) return o
-      const nextPallet = { ...pallet, no: `P${o.pallets.length + 1}` }
-      pallet.no = nextPallet.no
-      return { ...o, pallets: [...o.pallets, nextPallet] }
+      const pallet: Pallet = {
+        ...input,
+        id,
+        no: `P${o.pallets.length + 1}`,
+        createdAt: Date.now(),
+      }
+      return { ...o, pallets: [...o.pallets, pallet] }
     }),
   })
-  return pallet.id
+  return id
+}
+
+export function updatePallet(orderId: string, palletId: string, patch: Partial<Omit<Pallet, 'id'>>) {
+  commit({
+    ...state,
+    orders: state.orders.map((o) => {
+      if (o.id !== orderId) return o
+      return { ...o, pallets: o.pallets.map((p) => (p.id === palletId ? { ...p, ...patch } : p)) }
+    }),
+  })
 }
 
 export function removePallet(orderId: string, palletId: string) {
@@ -555,36 +783,8 @@ export function removePallet(orderId: string, palletId: string) {
     ...state,
     orders: state.orders.map((o) => {
       if (o.id !== orderId) return o
-      const pallets = o.pallets
-        .filter((p) => p.id !== palletId)
-        .map((p, i) => ({ ...p, no: `P${i + 1}` }))
+      const pallets = o.pallets.filter((p) => p.id !== palletId).map((p, i) => ({ ...p, no: `P${i + 1}` }))
       return { ...o, pallets }
-    }),
-  })
-}
-
-/** 设置某个拖板上某品项的箱数，0 表示移除 */
-export function setItemBoxes(orderId: string, palletId: string, skuId: string, boxes: number) {
-  commit({
-    ...state,
-    orders: state.orders.map((o) => {
-      if (o.id !== orderId) return o
-      return {
-        ...o,
-        pallets: o.pallets.map((p) => {
-          if (p.id !== palletId) return p
-          const idx = p.items.findIndex((it) => it.skuId === skuId)
-          let items = p.items
-          if (idx >= 0) {
-            items = boxes > 0
-              ? p.items.map((it, i) => (i === idx ? { ...it, boxes } : it))
-              : p.items.filter((_, i) => i !== idx)
-          } else if (boxes > 0) {
-            items = [...p.items, { skuId, boxes }]
-          }
-          return { ...p, items }
-        }),
-      }
     }),
   })
 }
@@ -605,48 +805,56 @@ export function movePallet(orderId: string, palletId: string, dir: -1 | 1) {
   })
 }
 
-/** 这车货每个品项要出多少箱 */
+/** 这车货每个“品项 + 生产日期”要出多少箱 */
+export function needByDate(order: Order) {
+  const map = new Map<string, { skuId: string; prodDate: string; boxes: number }>()
+  for (const p of order.pallets) {
+    const key = `${p.skuId}|${p.prodDate}`
+    const cur = map.get(key)
+    if (cur) cur.boxes += palletBoxes(p)
+    else map.set(key, { skuId: p.skuId, prodDate: p.prodDate, boxes: palletBoxes(p) })
+  }
+  return [...map.values()]
+}
+
+/** 这车货每个品项要出多少箱（不分日期） */
 export function needOf(order: Order) {
   const need = new Map<string, number>()
   for (const p of order.pallets) {
-    for (const it of p.items) {
-      need.set(it.skuId, (need.get(it.skuId) ?? 0) + it.boxes)
-    }
+    need.set(p.skuId, (need.get(p.skuId) ?? 0) + palletBoxes(p))
   }
   return need
 }
 
-/** 发车前对一下账：哪些品项不够，各差多少件 */
+/** 发车前对账：某个品项某个日期够不够（按生产日期要货，就不能从别的日期挪） */
 export function shortages(db: DB, order: Order) {
-  const out: { sku: Sku; need: number; have: number; short: number }[] = []
-  for (const [skuId, boxes] of needOf(order)) {
-    const sku = db.skus.find((s) => s.id === skuId)
+  const out: { sku: Sku; prodDate: string; need: number; have: number; short: number }[] = []
+  for (const line of needByDate(order)) {
+    const sku = db.skus.find((s) => s.id === line.skuId)
     if (!sku) continue
-    const need = boxes * (sku.perBox || 1)
-    const have = stockOf(db, skuId)
-    if (need > have) out.push({ sku, need, have, short: need - have })
+    const need = line.boxes * (sku.perBox || 1)
+    const have = stockOfDate(db, line.skuId, line.prodDate)
+    if (need > have) out.push({ sku, prodDate: line.prodDate, need, have, short: need - have })
   }
   return out
 }
 
 /**
- * 确认发车：按拖板汇总箱数，折成件数后先进先出扣库存。
+ * 确认发车：按“品项 + 生产日期”汇总箱数，折成件数后从该日期的批次里先进先出扣。
  * 扣减不是改数字，而是给每个被吃到的批次记一笔负数流水。
- * 库存不够时照样记（账面会出现负数），前端负责提示。
  */
 export function shipOrder(id: string) {
   const order = state.orders.find((o) => o.id === id)
   if (!order || order.status === 'shipped') return
 
-  let moves = state.moves
   const newMoves: Move[] = []
 
-  for (const [skuId, boxes] of needOf(order)) {
-    const sku = state.skus.find((s) => s.id === skuId)
-    let remain = boxes * (sku?.perBox || 1)
+  for (const line of needByDate(order)) {
+    const sku = state.skus.find((s) => s.id === line.skuId)
+    let remain = line.boxes * (sku?.perBox || 1)
 
     const pool = state.batches
-      .filter((b) => b.skuId === skuId)
+      .filter((b) => b.skuId === line.skuId && b.prodDate === line.prodDate)
       .map((b) => ({ batch: b, left: batchLeft(state, b.id) }))
       .filter((x) => x.left > 0)
       .sort((a, b) => a.batch.createdAt - b.batch.createdAt)
@@ -659,34 +867,32 @@ export function shipOrder(id: string) {
         id: uid(),
         at: Date.now(),
         type: 'out',
-        skuId,
+        skuId: line.skuId,
         batchId: batch.id,
         qty: -take,
         ref: order.no,
-        note: '发车出库',
+        note: `发车出库(${line.prodDate})`,
       })
     }
 
-    // 所有批次都吃空了还不够：记一笔无批次的负数流水，把缺口显性化，方便事后补
+    // 这个日期的货不够：记一笔无批次的负数流水，把缺口显性化，方便事后补
     if (remain > 0) {
       newMoves.push({
         id: uid(),
         at: Date.now(),
         type: 'out',
-        skuId,
+        skuId: line.skuId,
         batchId: '',
         qty: -remain,
         ref: order.no,
-        note: '库存不足，超发部分',
+        note: `库存不足，超发(${line.prodDate})`,
       })
     }
   }
 
-  moves = [...newMoves.reverse(), ...moves]
-
   commit({
     ...state,
-    moves,
+    moves: [...newMoves.reverse(), ...state.moves],
     orders: state.orders.map((o) => (o.id === id ? { ...o, status: 'shipped' } : o)),
   })
 }
@@ -735,6 +941,14 @@ export function saveTruck(t: Omit<Truck, 'id'> & { id?: string }) {
 
 export const skuById = (skus: Sku[], id: string) => skus.find((s) => s.id === id)
 
+export function skusOfCustomer(db: DB, customerId: string) {
+  return db.skus.filter((s) => s.customerId === customerId)
+}
+
+export function customerById(db: DB, id: string) {
+  return db.customers.find((c) => c.id === id)
+}
+
 type Projection = { bySku: Map<string, number>; byBatch: Map<string, number> }
 let projFor: DB | null = null
 let proj: Projection = { bySku: new Map(), byBatch: new Map() }
@@ -763,6 +977,25 @@ export function batchesOf(db: DB, skuId: string) {
     .map((batch) => ({ batch, left: batchLeft(db, batch.id) }))
     .filter((x) => x.left > 0)
     .sort((a, b) => a.batch.createdAt - b.batch.createdAt)
+}
+
+/** 某品项按生产日期还剩多少，日期从新到旧 */
+export function stockByDate(db: DB, skuId: string) {
+  const map = new Map<string, number>()
+  for (const { batch, left } of batchesOf(db, skuId)) {
+    const d = batch.prodDate || '未填日期'
+    map.set(d, (map.get(d) ?? 0) + left)
+  }
+  return [...map.entries()]
+    .map(([prodDate, left]) => ({ prodDate, left }))
+    .sort((a, b) => b.prodDate.localeCompare(a.prodDate))
+}
+
+/** 某品项某个生产日期还剩多少 */
+export function stockOfDate(db: DB, skuId: string, prodDate: string) {
+  return batchesOf(db, skuId)
+    .filter((x) => (x.batch.prodDate || '未填日期') === prodDate)
+    .reduce((s, x) => s + x.left, 0)
 }
 
 /** 某品项最近的库存流水 */

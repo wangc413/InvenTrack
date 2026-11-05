@@ -104,6 +104,20 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4.5 20c0-3.6 3.4-5.6 7.5-5.6s7.5 2 7.5 5.6" />
     </>
   ),
+  records: (
+    <>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M12 7.4V12l3.1 2" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M4.5 7h15" />
+      <path d="M9.6 7V5.3A1.3 1.3 0 0 1 10.9 4h2.2a1.3 1.3 0 0 1 1.3 1.3V7" />
+      <path d="M6.6 7l.8 11.2A1.8 1.8 0 0 0 9.2 20h5.6a1.8 1.8 0 0 0 1.8-1.8L17.4 7" />
+      <path d="M10.2 11v5M13.8 11v5" />
+    </>
+  ),
   pallet: (
     <>
       <path d="M4 4h16v11.5H4z" />

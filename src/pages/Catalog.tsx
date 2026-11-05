@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { removeSku, stockOf, useDB, type Sku } from '../lib/store'
 import SkuForm from '../components/SkuForm'
-import { toast } from '../components/UI'
+import { Icon, toast } from '../components/UI'
 
 export default function Catalog() {
   const db = useDB()
@@ -16,52 +16,58 @@ export default function Catalog() {
   return (
     <>
       <header className="topbar">
-        <div style={{ flex: 1 }}>
-          <h1>品项档案</h1>
-          <div className="sub">箱规和每箱件数是算箱数的基础</div>
-        </div>
-        <button className="icon-btn" onClick={add} aria-label="新增">
-          ＋
+        <h1>品项档案</h1>
+        <button className="icon-btn" onClick={add} aria-label="新增品项">
+          <Icon name="plus" size={20} />
         </button>
+        <p className="sub">箱规、每箱件数和箱面配色，3D 装箱图按这些来画</p>
       </header>
 
       <main className="page">
-        <div className="card">
-          {db.skus.length === 0 ? (
-            <div className="empty">
-              还没有品项
-              <br />
-              点右上角 ＋ 建一个
-            </div>
-          ) : (
-            db.skus.map((s) => (
-              <div
-                className="row"
-                key={s.id}
-                onClick={() => {
-                  setEditing(s)
-                  setOpen(true)
-                }}
-              >
-                <div className="grow">
-                  <div className="name">{s.name}</div>
-                  <div className="meta">
-                    {s.spec || '无规格'} · {s.boxL}×{s.boxW}×{s.boxH}cm · {s.boxWeight}kg/箱
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
-                  <div className="tag info">每箱 {s.perBox}</div>
-                  <div className="meta num" style={{ marginTop: 4 }}>
-                    存 {stockOf(db, s.id)}
-                  </div>
-                </div>
+        {db.customers.map((c) => {
+          const list = db.skus.filter((s) => s.customerId === c.id)
+          if (list.length === 0) return null
+          return (
+            <section key={c.id}>
+              <div className="group-label">
+                {c.name}
+                <span>{list.length} 个品</span>
               </div>
-            ))
-          )}
-        </div>
+              <div className="card">
+                {list.map((s) => (
+                  <div
+                    className="row"
+                    key={s.id}
+                    onClick={() => {
+                      setEditing(s)
+                      setOpen(true)
+                    }}
+                  >
+                    <span className="pick-swatch" style={{ background: s.accentColor, height: 30 }} />
+                    <div className="grow">
+                      <div className="name">{s.shortName}</div>
+                      <div className="meta">
+                        {s.spec || '无规格'}
+                      </div>
+                      <div className="meta">
+                        {s.boxL}×{s.boxW}×{s.boxH} mm · {s.boxWeight} kg/箱
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+                      <div className="tag info">每箱 {s.perBox}</div>
+                      <div className="meta num" style={{ marginTop: 4 }}>
+                        存 {stockOf(db, s.id)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )
+        })}
 
-        <div style={{ fontSize: 12, color: 'var(--faint)', lineHeight: 1.7, marginTop: 14, padding: '0 4px' }}>
-          箱规填得越准，装车方案越靠谱。不确定时可以先用卷尺量一箱实际外廓。
+        <div className="hint">
+          箱规照外箱稿上的「长*宽*高（外径）」填，单位毫米。填得越准，3D 装箱图和装车数越靠谱。
         </div>
       </main>
 

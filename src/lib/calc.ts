@@ -1,4 +1,4 @@
-import type { DB, Order, Pallet, Sku, Truck } from './store'
+import { palletBoxes, type DB, type Order, type Pallet, type Sku, type Truck } from './store'
 
 /** 件数换算箱数 */
 export function boxify(qty: number, perBox: number) {
@@ -8,23 +8,39 @@ export function boxify(qty: number, perBox: number) {
   return { full, tail, total: full + (tail > 0 ? 1 : 0) }
 }
 
-/** 单箱体积，单位 m³ */
+/** 单箱体积，单位 m³（外箱尺寸按毫米存） */
 export function boxVolume(sku: Sku) {
-  return (sku.boxL * sku.boxW * sku.boxH) / 1_000_000
+  return (sku.boxL * sku.boxW * sku.boxH) / 1_000_000_000
+}
+
+/** 一块板上按“每层几个”铺开，占多大地方（毫米） */
+export function stackLayout(sku: Sku, perLayer: number) {
+  const n = Math.max(1, Math.min(perLayer, 40))
+  let best = { cols: 1, rows: n, L: sku.boxL, W: n * sku.boxW, score: Number.POSITIVE_INFINITY }
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols)
+    const L = cols * sku.boxL
+    const W = rows * sku.boxW
+    const waste = cols * rows - n
+    // 目标长宽比接近标准托盘 1.2 : 1，同时别留太多空格子
+    const score = Math.abs(Math.log(L / W / 1.2)) + waste * 0.18
+    if (score < best.score) best = { cols, rows, L, W, score }
+  }
+  return best
 }
 
 export type PalletStat = {
   pallet: Pallet
+  sku: Sku | undefined
   boxes: number
   qty: number
   volume: number
   weight: number
-  /** 铺满拖板图用的箱子序列，每个元素对应一箱，值是品项在调色板里的序号 */
-  segments: { skuId: string; color: number; count: number }[]
 }
 
 export type LineDetail = {
   sku: Sku
+  prodDate: string
   boxes: number
   qty: number
   volume: number
@@ -41,53 +57,44 @@ export type OrderSummary = {
   totalWeight: number
 }
 
-export function summarizePallet(db: DB, pallet: Pallet, colorOf: (skuId: string) => number): PalletStat {
-  let boxes = 0
-  let qty = 0
-  let volume = 0
-  let weight = 0
-  const segments: PalletStat['segments'] = []
-
-  for (const it of pallet.items) {
-    const sku = db.skus.find((s) => s.id === it.skuId)
-    if (!sku) continue
-    boxes += it.boxes
-    qty += it.boxes * sku.perBox
-    volume += it.boxes * boxVolume(sku)
-    weight += it.boxes * sku.boxWeight
-    segments.push({ skuId: sku.id, color: colorOf(sku.id), count: it.boxes })
+export function statOfPallet(db: DB, pallet: Pallet): PalletStat {
+  const sku = db.skus.find((s) => s.id === pallet.skuId)
+  const boxes = palletBoxes(pallet)
+  return {
+    pallet,
+    sku,
+    boxes,
+    qty: sku ? boxes * sku.perBox : 0,
+    volume: sku ? boxes * boxVolume(sku) : 0,
+    weight: sku ? boxes * sku.boxWeight : 0,
   }
-
-  return { pallet, boxes, qty, volume, weight, segments }
 }
 
 export function summarize(db: DB, order: Order): OrderSummary {
-  const colorIndex = new Map<string, number>()
-  const colorOf = (id: string) => {
-    if (!colorIndex.has(id)) colorIndex.set(id, colorIndex.size)
-    return colorIndex.get(id)!
-  }
+  const pallets = order.pallets.map((p) => statOfPallet(db, p))
 
-  const pallets = order.pallets.map((p) => summarizePallet(db, p, colorOf))
-
-  const boxMap = new Map<string, number>()
-  for (const p of order.pallets) {
-    for (const it of p.items) boxMap.set(it.skuId, (boxMap.get(it.skuId) ?? 0) + it.boxes)
+  const map = new Map<string, LineDetail>()
+  for (const p of pallets) {
+    if (!p.sku) continue
+    const key = `${p.pallet.skuId}|${p.pallet.prodDate}`
+    const cur = map.get(key)
+    if (cur) {
+      cur.boxes += p.boxes
+      cur.qty += p.qty
+      cur.volume += p.volume
+      cur.weight += p.weight
+    } else {
+      map.set(key, {
+        sku: p.sku,
+        prodDate: p.pallet.prodDate,
+        boxes: p.boxes,
+        qty: p.qty,
+        volume: p.volume,
+        weight: p.weight,
+      })
+    }
   }
-
-  const lines: LineDetail[] = []
-  for (const [skuId, boxes] of boxMap) {
-    const sku = db.skus.find((s) => s.id === skuId)
-    if (!sku) continue
-    lines.push({
-      sku,
-      boxes,
-      qty: boxes * sku.perBox,
-      volume: boxes * boxVolume(sku),
-      weight: boxes * sku.boxWeight,
-    })
-  }
-  lines.sort((a, b) => b.boxes - a.boxes)
+  const lines = [...map.values()].sort((a, b) => b.boxes - a.boxes)
 
   return {
     pallets,
@@ -108,8 +115,6 @@ export type TruckPlan = {
   overVolume: boolean
   overWeight: boolean
   trucksNeeded: number
-  perLayer: number
-  layers: number
   layout: {
     skuName: string
     boxL: number
@@ -146,7 +151,7 @@ export function maxBoxesFor(truck: Truck, l: number, w: number, h: number) {
 }
 
 export function planTruck(truck: Truck, summary: OrderSummary): TruckPlan {
-  const capacityVolume = (truck.L * truck.W * truck.H) / 1_000_000
+  const capacityVolume = (truck.L * truck.W * truck.H) / 1_000_000_000
   const volumeRate = capacityVolume > 0 ? summary.totalVolume / capacityVolume : 0
   const weightRate = truck.maxWeight > 0 ? summary.totalWeight / truck.maxWeight : 0
 
@@ -154,7 +159,7 @@ export function planTruck(truck: Truck, summary: OrderSummary): TruckPlan {
     .map((l) => {
       const m = maxBoxesFor(truck, l.sku.boxL, l.sku.boxW, l.sku.boxH)
       return {
-        skuName: l.sku.name,
+        skuName: l.sku.shortName,
         boxL: l.sku.boxL,
         boxW: l.sku.boxW,
         boxH: l.sku.boxH,
@@ -165,8 +170,6 @@ export function planTruck(truck: Truck, summary: OrderSummary): TruckPlan {
     })
     .sort((a, b) => b.capacityPerTruck - a.capacityPerTruck)
 
-  const dominant = layout[0]
-
   return {
     truck,
     capacityVolume,
@@ -175,8 +178,6 @@ export function planTruck(truck: Truck, summary: OrderSummary): TruckPlan {
     overVolume: volumeRate > 1,
     overWeight: weightRate > 1,
     trucksNeeded: Math.max(1, Math.ceil(Math.max(volumeRate, weightRate))),
-    perLayer: dominant?.perLayer ?? 0,
-    layers: dominant?.layers ?? 0,
     layout,
   }
 }
@@ -185,12 +186,15 @@ export function fmt(n: number, digits = 2) {
   return Number.isFinite(n) ? n.toFixed(digits).replace(/\.?0+$/, '') : '0'
 }
 
-/** 拖板配色，按品项顺序循环。黑白灰阶，靠明度区分同一块板上的不同品项 */
-export const PALLET_COLORS = [
-  { fill: '#d2d4d8', stroke: '#6f6f76' },
-  { fill: '#bfc2c8', stroke: '#64646b' },
-  { fill: '#acb0b7', stroke: '#5a5a61' },
-  { fill: '#c8cbd0', stroke: '#73737a' },
-  { fill: '#b5b9bf', stroke: '#616168' },
-  { fill: '#a2a6ae', stroke: '#55555c' },
-]
+/** 日期显示：11-03 */
+export function fmtDate(d: string) {
+  if (!d) return '未填日期'
+  const parts = d.split('-')
+  return parts.length === 3 ? `${parts[1]}-${parts[2]}` : d
+}
+
+export function fmtTime(at: number) {
+  const d = new Date(at)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
