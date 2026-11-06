@@ -147,7 +147,15 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const dates = sku ? stockByDate(db, sku.id) : []
   const picked = dates.find((d) => d.prodDate === prodDate)
 
-  /** 一层怎么摆是写死的：包子 3 竖 + 4 横 = 7 个，烧麦 3 竖 + 2 横 = 5 个 */
+  /** 一层比托盘多出来多少，给成「前后各 8 厘米」这样的人话 */
+function overText(over: { x: number; z: number }) {
+  const parts: string[] = []
+  if (over.x > 0) parts.push(`左右各 ${Math.round(over.x / 20)} 厘米`)
+  if (over.z > 0) parts.push(`前后各 ${Math.round(over.z / 20)} 厘米`)
+  return `${parts.join('、')}`
+}
+
+/** 一层怎么摆是写死的：包子 3 竖 + 4 横 = 7 个，烧麦 3 竖 + 2 横 = 5 个 */
   const plan = sku ? layerPlan(sku) : null
   const perLayer = plan?.perLayer ?? 0
   const perBox = sku?.perBox || 1
@@ -321,7 +329,12 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
                 <span>每层</span>
                 <b>{perLayer}</b>
               </div>
-              <div className="op-note">{plan?.note} · 隔层调头</div>
+              <div className={`op-note ${plan?.over ? 'warn' : ''}`}>
+                {plan?.note} · 隔层调头
+                {plan?.over
+                  ? ` · 一层 ${perLayer} 箱，比板 ${overText(plan.over)}`
+                  : ''}
+              </div>
             </div>
           )}
         </div>

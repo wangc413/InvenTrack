@@ -1999,6 +1999,11 @@ textarea.input {
   color: var(--sub);
 }
 
+/* 一层摆不下托盘时，这行变红提醒探出多少 */
+.pack-ops .op-note.warn {
+  color: var(--danger);
+}
+
 /* 品类标签上的色点 */
 .chip-dot {
   width: 8px;

@@ -144,7 +144,9 @@ const NICK_RULES: [RegExp, string][] = [
   [/菜包/, '菜包'],
   [/花卷/, '花卷'],
   [/馒头/, '馒头'],
-  [/饺子/, '饺子'],
+  [/饺子|水饺/, '饺子'],
+  [/菜团子/, '菜团子'],
+  [/糯米鸡/, '糯米鸡'],
   [/馄饨/, '馄饨'],
 ]
 
@@ -162,9 +164,12 @@ export const CUSTOMER_CYY = 'c-cyy'
 /** 盒马示例库存：这几个「几天前」作为生产日期，每个品每个日期都是 200 箱 */
 export const HM_STOCK_DAYS = [9, 6, 3, 1]
 export const HM_STOCK_BOXES = 200
+/** 快乐猴示例库存：两个日期，每个品每个日期 100 箱 */
+export const KLH_STOCK_DAYS = [4, 2]
+export const KLH_STOCK_BOXES = 100
 
 /** 数据版本：升级时靠它判断要不要补示例数据 */
-const DATA_VERSION = 2
+const DATA_VERSION = 3
 
 function seed(): DB {
   const now = Date.now()
@@ -231,15 +236,75 @@ function seed(): DB {
       accentColor: '#f08a2a',
       textColor: '#ffffff',
     }),
+    // ---- 快乐猴：箱规按外箱稿实测（外径，毫米） ----
+    mk({
+      id: 'sku-meat-klh',
+      name: '快乐猴 80g 鲜汁大肉包',
+      shortName: '鲜汁大肉包',
+      spec: '800克(10只)×10袋',
+      customerId: CUSTOMER_KLH,
+      perBox: 10,
+      boxL: 500,
+      boxW: 340,
+      boxH: 220,
+      boxWeight: 8.6,
+      accentColor: '#6b2f2a',
+    }),
     mk({
       id: 'sku-green-klh',
-      name: '翡翠香菇青菜包（快乐猴）',
-      shortName: '翡翠香菇青菜包',
+      name: '快乐猴 80g 翡翠香菇大菜包',
+      shortName: '翡翠香菇大菜包',
       spec: '640克(8只)×12袋',
       customerId: CUSTOMER_KLH,
       perBox: 12,
+      boxL: 500,
+      boxW: 340,
+      boxH: 220,
       boxWeight: 8.2,
       accentColor: '#3aa15c',
+    }),
+    mk({
+      id: 'sku-caitianzi-klh',
+      name: '快乐猴 手作菜团子',
+      shortName: '菜团子',
+      spec: '600克(6只)×20袋',
+      customerId: CUSTOMER_KLH,
+      perBox: 20,
+      boxL: 445,
+      boxW: 350,
+      boxH: 270,
+      boxWeight: 12.5,
+      boxColor: '#e8c88a',
+      accentColor: '#c98a2e',
+    }),
+    mk({
+      id: 'sku-jiaozi-klh',
+      name: '快乐猴 20g 猪肉水饺',
+      shortName: '水饺',
+      nick: '饺子',
+      spec: '2kg×6袋',
+      customerId: CUSTOMER_KLH,
+      perBox: 6,
+      boxL: 430,
+      boxW: 300,
+      boxH: 230,
+      boxWeight: 12.6,
+      boxColor: '#dfe3ea',
+      accentColor: '#4a6db5',
+    }),
+    mk({
+      id: 'sku-nuomiji-klh',
+      name: '快乐猴 手作荷香糯米鸡',
+      shortName: '荷香糯米鸡',
+      nick: '糯米鸡',
+      spec: '600克×20袋',
+      customerId: CUSTOMER_KLH,
+      perBox: 20,
+      boxL: 400,
+      boxW: 345,
+      boxH: 235,
+      boxWeight: 12.5,
+      accentColor: '#7a5c3a',
     }),
     mk({
       id: 'sku-meat-cyy',
@@ -272,8 +337,12 @@ function seed(): DB {
     for (const n of HM_STOCK_DAYS) stock(s, day(n), HM_STOCK_BOXES * (s.perBox || 1))
   }
 
-  // 其他收货方留少量库存，方便试「库存不足」的拦截
-  stock(byId('sku-green-klh'), day(2), 96)
+  // 快乐猴：每个品、每个日期 100 箱
+  for (const s of skus.filter((x) => x.customerId === CUSTOMER_KLH)) {
+    for (const n of KLH_STOCK_DAYS) stock(s, day(n), KLH_STOCK_BOXES * (s.perBox || 1))
+  }
+
+  // 菜洋洋留少量库存，方便试「库存不足」的拦截
   stock(byId('sku-meat-cyy'), day(3), 80)
 
   return {
@@ -388,53 +457,60 @@ function migrate(raw: Record<string, unknown>): DB {
     H: t.H < 100 ? t.H * 10 : t.H,
   }))
 
-  // v2：盒马示例库存补到「每个品、每个日期 200 箱」。只补差额，不动已有单据和批次
+  // 示例库存补齐：只补差额，不动已有单据和已经发出去的货
   const version = Number(data.version) || 1
+
+  const leftOfBatch = new Map<string, number>()
+  for (const m of moves) {
+    if (!m.batchId || m.voided) continue
+    leftOfBatch.set(m.batchId, (leftOfBatch.get(m.batchId) ?? 0) + m.qty)
+  }
+  const leftOfDate = (skuId: string, prodDate: string) => {
+    let n = 0
+    for (const b of batches) {
+      if (b.skuId !== skuId || (b.prodDate || '') !== prodDate) continue
+      n += leftOfBatch.get(b.id) ?? 0
+    }
+    return n
+  }
+  /** 把这个品这个日期补到 boxes 箱（按 perBox 折件），不够才补 */
+  const topUp = (sku: Sku, prodDate: string, boxes: number, note: string) => {
+    const need = boxes * (sku.perBox || 1) - leftOfDate(sku.id, prodDate)
+    if (need <= 0) return
+    let batch = batches.find((b) => b.skuId === sku.id && (b.prodDate || '') === prodDate)
+    if (batch) {
+      batch.qty += need
+    } else {
+      batch = { id: uid(), skuId: sku.id, batchNo: prodDate.replace(/-/g, ''), qty: need, prodDate, createdAt: Date.now() }
+      batches.push(batch)
+    }
+    moves.push({ id: uid(), at: Date.now(), type: 'in', skuId: sku.id, batchId: batch.id, qty: need, ref: '示例补齐', note })
+  }
+
+  // v2：盒马每个品、每个生产日期补到 200 箱
   if (version < 2) {
-    const leftOfBatch = new Map<string, number>()
-    for (const m of moves) {
-      if (!m.batchId || m.voided) continue
-      leftOfBatch.set(m.batchId, (leftOfBatch.get(m.batchId) ?? 0) + m.qty)
-    }
-    const leftOfDate = (skuId: string, prodDate: string) => {
-      let n = 0
-      for (const b of batches) {
-        if (b.skuId !== skuId || (b.prodDate || '') !== prodDate) continue
-        n += leftOfBatch.get(b.id) ?? 0
-      }
-      return n
-    }
     for (const sku of skus.filter((s) => s.customerId === CUSTOMER_HM)) {
-      for (const back of HM_STOCK_DAYS) {
-        const prodDate = daysAgo(back)
-        const target = HM_STOCK_BOXES * (sku.perBox || 1)
-        const need = target - leftOfDate(sku.id, prodDate)
-        if (need <= 0) continue
-        let batch = batches.find((b) => b.skuId === sku.id && (b.prodDate || '') === prodDate)
-        if (batch) {
-          batch.qty += need
-        } else {
-          batch = {
-            id: uid(),
-            skuId: sku.id,
-            batchNo: prodDate.replace(/-/g, ''),
-            qty: need,
-            prodDate,
-            createdAt: Date.now(),
-          }
-          batches.push(batch)
-        }
-        moves.push({
-          id: uid(),
-          at: Date.now(),
-          type: 'in',
-          skuId: sku.id,
-          batchId: batch.id,
-          qty: need,
-          ref: '示例补齐',
-          note: '盒马示例库存补到 200 箱/日期',
-        })
-      }
+      for (const back of HM_STOCK_DAYS) topUp(sku, daysAgo(back), HM_STOCK_BOXES, '盒马示例库存补到 200 箱/日期')
+    }
+  }
+
+  // v3：快乐猴上新品（肉包 / 菜包 / 菜团子 / 饺子 / 糯米鸡），给老数据补上品项和示例库存
+  if (version < 3) {
+    for (const sku of base.skus.filter((s) => s.customerId === CUSTOMER_KLH)) {
+      if (skus.some((x) => x.id === sku.id)) continue
+      skus.push(sku)
+    }
+    // 老的快乐猴菜包箱规也按外箱稿校正
+    const green = skus.find((x) => x.id === 'sku-green-klh')
+    if (green) {
+      green.name = '快乐猴 80g 翡翠香菇大菜包'
+      green.shortName = '翡翠香菇大菜包'
+      green.boxL = 500
+      green.boxW = 340
+      green.boxH = 220
+    }
+    for (const sku of skus.filter((s) => s.customerId === CUSTOMER_KLH)) {
+      for (const back of KLH_STOCK_DAYS) topUp(sku, daysAgo(back), KLH_STOCK_BOXES, '快乐猴示例库存补齐')
     }
   }
 

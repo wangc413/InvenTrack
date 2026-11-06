@@ -64,6 +64,8 @@ export type LayerPlan = {
   note: string
   /** true = 现场固定的码法，不是按箱规算出来的 */
   fixed: boolean
+  /** 一层摆下来比托盘多出来的尺寸（毫米），摆不下才会填 */
+  over?: { x: number; z: number }
 }
 
 /** 按箱规铺成整齐的方阵，能转 90° 就转，取放得多的那种 */
@@ -147,11 +149,82 @@ function shaomaiPlan(sku: Sku): LayerPlan {
   return { perLayer: slots.length, slots, note: '3 竖 + 2 横（留缝）', fixed: true }
 }
 
-/** 包子、烧麦走现场固定码法，其余按箱规铺方阵 */
+/**
+ * 按「一层要几个」铺：箱子一行一行码，整行要么长边顺 1.2 m、要么转 90°。
+ * 摆不满托盘时按最省的方式选行数，算出探出多少 —— 现场确实会把箱子堆到板沿外，
+ * 所以这里不硬拦，只把探出量报上去让界面提醒。
+ */
+function rowsPlan(sku: Sku, want: number): LayerPlan {
+  const l = Math.max(1, sku.boxL)
+  const w = Math.max(1, sku.boxW)
+  const capA = Math.max(1, Math.floor(PALLET_L / l)) // 长边顺 1.2 m
+  const capB = Math.max(1, Math.floor(PALLET_L / w)) // 转 90°
+
+  let best: { rows: { n: number; turn: boolean }[]; x: number; z: number; over: number } | null = null
+
+  for (let na = 0; na <= want; na++) {
+    for (let nb = 0; nb <= want; nb++) {
+      if (na * capA + nb * capB < want) continue
+      // 先排满行，再从末尾削掉多余的
+      const rows: { n: number; turn: boolean }[] = [
+        ...Array.from({ length: na }, () => ({ n: capA, turn: false })),
+        ...Array.from({ length: nb }, () => ({ n: capB, turn: true })),
+      ]
+      let extra = na * capA + nb * capB - want
+      for (let i = rows.length - 1; i >= 0 && extra > 0; i--) {
+        const cut = Math.min(rows[i].n, extra)
+        rows[i].n -= cut
+        extra -= cut
+      }
+      const kept = rows.filter((r) => r.n > 0)
+      if (kept.length === 0) continue
+      const x = Math.max(...kept.map((r) => r.n * (r.turn ? w : l)))
+      const z = kept.reduce((sum, r) => sum + (r.turn ? l : w), 0)
+      const over = Math.max(0, x - PALLET_L) + Math.max(0, z - PALLET_W)
+      if (!best || over < best.over || (over === best.over && z < best.z)) {
+        best = { rows: kept, x, z, over }
+      }
+    }
+  }
+
+  const rows = best?.rows ?? [{ n: Math.min(want, capA), turn: false }]
+  const depth = rows.reduce((sum, r) => sum + (r.turn ? l : w), 0)
+
+  const slots: Slot[] = []
+  let cursor = -depth / 2
+  for (const r of rows) {
+    const rh = r.turn ? l : w
+    const rw = r.n * (r.turn ? w : l)
+    for (let i = 0; i < r.n; i++) {
+      const dx = r.turn ? w : l
+      slots.push({ x: -rw / 2 + dx / 2 + i * dx, z: cursor + rh / 2, turn: r.turn })
+    }
+    cursor += rh
+  }
+
+  const over = { x: Math.max(0, (best?.x ?? 0) - PALLET_L), z: Math.max(0, depth - PALLET_W) }
+  const note = `${rows.map((r) => r.n).join(' + ')} ${['一', '两', '三', '四'][rows.length - 1] ?? rows.length}排`
+  return {
+    perLayer: slots.length,
+    slots,
+    note,
+    fixed: true,
+    ...(over.x > 0 || over.z > 0 ? { over } : {}),
+  }
+}
+
+/**
+ * 现场定的「一层几个」：
+ *   包子 7（3 竖 + 4 横）、糯米鸡 7（同样码法）、烧麦 5（3 竖 + 2 横留缝）、
+ *   饺子 10（4 + 4 + 2 三排，比板长 16 cm，探出板边）、菜团子 8（2 + 3 + 3 三排，比板宽 24 cm）。
+ * 只写死一行个数，具体怎么摆还是按箱规算，换箱规不会算出重叠。
+ */
 export function layerPlan(sku: Sku): LayerPlan {
   const key = `${sku.name}${sku.shortName}`
-  if (/菜包|肉包/.test(key)) return baoPlan(sku)
   if (/烧麦/.test(key)) return shaomaiPlan(sku)
+  if (/饺子|水饺/.test(key)) return rowsPlan(sku, 10)
+  if (/菜团子/.test(key)) return rowsPlan(sku, 8)
+  if (/菜包|肉包|糯米鸡/.test(key)) return baoPlan(sku)
   return gridPlan(sku)
 }
 
