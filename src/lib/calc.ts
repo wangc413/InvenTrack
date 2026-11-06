@@ -37,6 +37,33 @@ export function boxVolume(sku: Sku) {
   return (sku.boxL * sku.boxW * sku.boxH) / 1_000_000_000
 }
 
+/* ---------- 托盘的物理边界 ---------- */
+
+/** 标准托盘占地，毫米 */
+export const PALLET_L = 1200
+export const PALLET_W = 1000
+/** 托盘本身高度（顶板算进来） */
+export const PALLET_H = 145
+/** 连托盘一起的码垛上限，1.8 米，再高叉车看不稳也进不了车厢 */
+export const MAX_STACK_H = 1800
+
+/**
+ * 这个箱规一层最多能码几个：按托盘实际尺寸排，允许箱子转 90°。
+ * 以前是「每层固定 6 个」，烧麦那种 465×410 的箱子其实只能码 4 个。
+ */
+export function maxPerLayer(sku: Sku) {
+  const l = Math.max(1, sku.boxL)
+  const w = Math.max(1, sku.boxW)
+  const plain = Math.floor(PALLET_L / l) * Math.floor(PALLET_W / w)
+  const turned = Math.floor(PALLET_L / w) * Math.floor(PALLET_W / l)
+  return Math.max(1, plain, turned)
+}
+
+/** 这个箱规最多能码几层：按 1.8 米总高倒推 */
+export function maxLayers(sku: Sku) {
+  return Math.max(1, Math.floor((MAX_STACK_H - PALLET_H) / Math.max(50, sku.boxH)))
+}
+
 /** 一块板上按“每层几个”铺开，占多大地方（毫米） */
 export function stackLayout(sku: Sku, perLayer: number) {
   const n = Math.max(1, Math.min(perLayer, 40))

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { stackLayout } from './calc'
+import { PALLET_L, PALLET_W, stackLayout } from './calc'
 import type { Sku } from './store'
 
 /** 全部按毫米建模，最后统一缩成米 */
@@ -21,9 +21,13 @@ export type PalletSpec = {
 }
 
 export type SceneHandle = {
-  dispose: () => void
+  /** 换一批板 / 改层数，只重排箱子，不重建 WebGL 场景 */
+  setPallets: (pallets: PalletSpec[]) => void
   resetView: () => void
+  dispose: () => void
 }
+
+const VIEW_DIR = new THREE.Vector3(0.26, 0.62, 0.74).normalize()
 
 /* ---------- 箱面纹理：照着外箱稿画一遍 ---------- */
 
@@ -124,20 +128,21 @@ function topTexture(sku: Sku) {
 
 /* ---------- 托盘 ---------- */
 
-function makePalletMesh(palletL: number, palletW: number) {
+type Sink = { dispose: () => void }[]
+
+function makePalletMesh(palletL: number, palletW: number, wood: THREE.Material, woodDark: THREE.Material, sink: Sink) {
   const group = new THREE.Group()
-  const wood = new THREE.MeshStandardMaterial({ color: 0xc7a97e, roughness: 0.94, metalness: 0 })
-  const woodDark = new THREE.MeshStandardMaterial({ color: 0xb08f63, roughness: 0.96, metalness: 0 })
 
   // 单位统一用米：底板 0~30，纵梁 30~115，顶板 115~145
   const boardGeo = new THREE.BoxGeometry(palletL, 0.03, palletW)
+  const beamGeo = new THREE.BoxGeometry(palletL, 0.085, 0.09)
+  sink.push(boardGeo, beamGeo)
 
   const bottom = new THREE.Mesh(boardGeo, woodDark)
   bottom.position.y = 0.015
   bottom.receiveShadow = true
   group.add(bottom)
 
-  const beamGeo = new THREE.BoxGeometry(palletL, 0.085, 0.09)
   for (const z of [-(palletW / 2 - 0.055), 0, palletW / 2 - 0.055]) {
     const beam = new THREE.Mesh(beamGeo, woodDark)
     beam.position.set(0, 0.0725, z)
@@ -156,7 +161,15 @@ function makePalletMesh(palletL: number, palletW: number) {
 
 /* ---------- 场景 ---------- */
 
-export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): SceneHandle {
+/**
+ * 挂一个 3D 场景。pallets 可以随时用 setPallets 换掉：
+ * 只清掉箱子重排，renderer / 相机 / 灯光都不重建，所以拖层数时是连续变形的。
+ */
+export function mountBoxes(
+  container: HTMLElement,
+  pallets: PalletSpec[],
+  opts: { emptyPallet?: boolean } = {},
+): SceneHandle {
   const scene = new THREE.Scene()
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
@@ -170,6 +183,7 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
   container.appendChild(renderer.domElement)
 
   const camera = new THREE.PerspectiveCamera(34, 1, 0.02, 200)
+  camera.position.set(1.6, 1.9, 2.1)
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.09
@@ -187,13 +201,14 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
   key.shadow.mapSize.set(1024, 1024)
   key.shadow.bias = -0.0012
   key.shadow.normalBias = 0.02
-  const cam = key.shadow.camera as THREE.OrthographicCamera
-  cam.left = -4
-  cam.right = 4
-  cam.top = 4
-  cam.bottom = -4
-  cam.near = 0.5
-  cam.far = 20
+  const sc = key.shadow.camera as THREE.OrthographicCamera
+  sc.left = -6
+  sc.right = 6
+  sc.top = 6
+  sc.bottom = -6
+  sc.near = 0.5
+  sc.far = 24
+  sc.updateProjectionMatrix()
   scene.add(key)
 
   const fill = new THREE.DirectionalLight(0xffffff, 0.55)
@@ -211,9 +226,14 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
   const root = new THREE.Group()
   scene.add(root)
 
-  // 每种箱规只生成一次纹理与几何，多块板共用
+  const wood = new THREE.MeshStandardMaterial({ color: 0xc7a97e, roughness: 0.94, metalness: 0 })
+  const woodDark = new THREE.MeshStandardMaterial({ color: 0xb08f63, roughness: 0.96, metalness: 0 })
+
+  // 每种箱规只生成一次纹理与几何，多块板、多次重排共用
   const cache = new Map<string, { geo: THREE.BoxGeometry; matSide: THREE.MeshStandardMaterial; matTop: THREE.MeshStandardMaterial }>()
   const disposables: { dispose: () => void }[] = []
+  /** 每次重排都会新建的几何（托盘），重排前要先释放 */
+  let transient: Sink = []
 
   function assetFor(sku: Sku) {
     const hit = cache.get(sku.id)
@@ -241,83 +261,119 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
     return asset
   }
 
-  // 先把每块板的占地算出来，才能横向排开
-  const plans = pallets.map((p) => {
-    const { cols, rows, L, W } = stackLayout(p.sku, p.perLayer)
-    return {
-      ...p,
-      cols,
-      rows,
-      palletL: (L + PALLET_MARGIN * 2) * MM,
-      palletW: (W + PALLET_MARGIN * 2) * MM,
-    }
-  })
+  /* ---------- 取景 ---------- */
 
-  const gap = 0.38
-  const totalW = plans.reduce((s, p) => s + p.palletL, 0) + gap * Math.max(0, plans.length - 1)
-  let cursor = -totalW / 2
+  const center = new THREE.Vector3(0, 0.5, 0)
+  /** 整垛的包围盒尺寸，取景按这个算比包围球准得多 */
+  const size = new THREE.Vector3(1, 1, 1)
+  /** 相机相对目标的朝向，跟着用户旋转走，改层数时不会把视角拽回去 */
+  const camDir = VIEW_DIR.clone()
 
-  for (const p of plans) {
-    const group = new THREE.Group()
-    group.position.x = cursor + p.palletL / 2
-    cursor += p.palletL + gap
-    root.add(group)
-
-    const pallet = makePalletMesh(p.palletL, p.palletW)
-    group.add(pallet)
-
-    const { geo, matSide, matTop } = assetFor(p.sku)
-    const stepL = p.sku.boxL * MM
-    const stepW = p.sku.boxW * MM
-    const stepH = p.sku.boxH * MM
-    const halfL = (p.cols * p.sku.boxL * MM) / 2
-    const halfW = (p.rows * p.sku.boxW * MM) / 2
-    const baseY = PALLET_H * MM
-
-    for (let layer = 0; layer < p.layers; layer++) {
-      const isTop = layer === p.layers - 1
-      const count = isTop ? Math.min(p.topCount, p.perLayer) : p.perLayer
-      for (let i = 0; i < count; i++) {
-        const col = i % p.cols
-        const row = Math.floor(i / p.cols)
-        // 箱子长边一律顺着托盘长度方向摆
-        const box = new THREE.Mesh(geo, [matTop, matSide])
-        box.position.set(
-          col * stepL + stepL / 2 - halfL,
-          baseY + layer * stepH + stepH / 2,
-          row * stepW + stepW / 2 - halfW,
-        )
-        box.castShadow = true
-        box.receiveShadow = true
-        group.add(box)
-      }
-    }
-  }
-
-  // 相机按实际包围球 + 当前画布比例取景，保证多板也能整个装进画面
-  const bbox = new THREE.Box3().setFromObject(root)
-  const sphere = bbox.getBoundingSphere(new THREE.Sphere())
-  const center = sphere.center.clone()
-  const radius = Math.max(0.35, sphere.radius)
-
-  let userMoved = false
-  controls.addEventListener('start', () => {
-    userMoved = true
-  })
-
-  const dirVec = new THREE.Vector3(0.26, 0.62, 0.74).normalize()
-
-  function frame() {
+  function fit() {
     const vFov = (camera.fov * Math.PI) / 180
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect)
-    const dist = Math.max(radius / Math.sin(vFov / 2), radius / Math.sin(hFov / 2)) * 0.86
-    camera.position.copy(center).addScaledVector(dirVec, dist)
+    // 绕竖轴转的时候，横向占用最多也就是长边；纵向就是堆高
+    const halfH = Math.max(size.x, size.z) / 2
+    const halfV = size.y / 2
+    const dist = Math.max(halfV / Math.tan(vFov / 2), halfH / Math.tan(hFov / 2)) * 1.16
+    camera.position.copy(center).addScaledVector(camDir, Math.max(0.3, dist))
     controls.target.copy(center)
     controls.update()
   }
 
-  key.target.position.copy(center)
-  scene.add(key.target)
+  /* ---------- 摆箱子 ---------- */
+
+  function clearRoot() {
+    for (const d of transient) d.dispose()
+    transient = []
+    root.clear()
+  }
+
+  function build(list: PalletSpec[]) {
+    clearRoot()
+
+    if (list.length === 0) {
+      if (opts.emptyPallet) {
+        const g = new THREE.Group()
+        g.add(
+          makePalletMesh(
+            (PALLET_L + PALLET_MARGIN * 2) * MM,
+            (PALLET_W + PALLET_MARGIN * 2) * MM,
+            wood,
+            woodDark,
+            transient,
+          ),
+        )
+        root.add(g)
+      }
+      const bbox = new THREE.Box3().setFromObject(root)
+      if (!bbox.isEmpty()) {
+        bbox.getCenter(center)
+        bbox.getSize(size)
+      }
+      return
+    }
+
+    // 先把每块板的占地算出来，才能横向排开
+    const plans = list.map((p) => {
+      const { cols, rows, L, W } = stackLayout(p.sku, p.perLayer)
+      return {
+        ...p,
+        cols,
+        rows,
+        palletL: (L + PALLET_MARGIN * 2) * MM,
+        palletW: (W + PALLET_MARGIN * 2) * MM,
+      }
+    })
+
+    const gap = 0.38
+    const totalW = plans.reduce((s, p) => s + p.palletL, 0) + gap * Math.max(0, plans.length - 1)
+    let cursor = -totalW / 2
+
+    for (const p of plans) {
+      const group = new THREE.Group()
+      group.position.x = cursor + p.palletL / 2
+      cursor += p.palletL + gap
+      root.add(group)
+
+      group.add(makePalletMesh(p.palletL, p.palletW, wood, woodDark, transient))
+
+      const { geo, matSide, matTop } = assetFor(p.sku)
+      const stepL = p.sku.boxL * MM
+      const stepW = p.sku.boxW * MM
+      const stepH = p.sku.boxH * MM
+      const halfL = (p.cols * p.sku.boxL * MM) / 2
+      const halfW = (p.rows * p.sku.boxW * MM) / 2
+      const baseY = PALLET_H * MM
+      const top = Math.min(p.topCount, p.perLayer)
+
+      for (let layer = 0; layer < p.layers; layer++) {
+        const isTop = layer === p.layers - 1
+        const count = isTop ? top : p.perLayer
+        for (let i = 0; i < count; i++) {
+          const col = i % p.cols
+          const row = Math.floor(i / p.cols)
+          // 箱子长边一律顺着托盘长度方向摆
+          const box = new THREE.Mesh(geo, [matTop, matSide])
+          box.position.set(
+            col * stepL + stepL / 2 - halfL,
+            baseY + layer * stepH + stepH / 2,
+            row * stepW + stepW / 2 - halfW,
+          )
+          box.castShadow = true
+          box.receiveShadow = true
+          group.add(box)
+        }
+      }
+    }
+
+    // 相机按实际包围盒 + 当前画布比例取景，保证整垛（不管几层）都在画面里
+    const bbox = new THREE.Box3().setFromObject(root)
+    if (!bbox.isEmpty()) {
+      bbox.getCenter(center)
+      bbox.getSize(size)
+    }
+  }
 
   function resize() {
     const w = container.clientWidth || 1
@@ -325,9 +381,14 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
     renderer.setSize(w, h, false)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
-    if (!userMoved) frame()
+    fit()
   }
+
+  build(pallets)
+  key.target.position.copy(center)
+  scene.add(key.target)
   resize()
+
   const ro = new ResizeObserver(resize)
   ro.observe(container)
 
@@ -336,18 +397,31 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
   const loop = () => {
     if (stopped) return
     controls.update()
+    // 记下用户当前视角，重排时照着这个方向重新取景
+    if (controls.target.distanceTo(camera.position) > 0.001) {
+      camDir.copy(camera.position).sub(controls.target).normalize()
+    }
     renderer.render(scene, camera)
     raf = requestAnimationFrame(loop)
   }
   loop()
 
   return {
-    resetView: frame,
+    setPallets(next) {
+      build(next)
+      key.target.position.copy(center)
+      fit()
+    },
+    resetView() {
+      camDir.copy(VIEW_DIR)
+      fit()
+    },
     dispose() {
       stopped = true
       cancelAnimationFrame(raf)
       ro.disconnect()
       controls.dispose()
+      clearRoot()
       scene.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh && mesh.material) {
@@ -356,6 +430,10 @@ export function mountBoxes(container: HTMLElement, pallets: PalletSpec[]): Scene
         }
       })
       for (const d of disposables) d.dispose()
+      wood.dispose()
+      woodDark.dispose()
+      ground.geometry.dispose()
+      ;(ground.material as THREE.Material).dispose()
       renderer.dispose()
       if (renderer.domElement.parentElement === container) container.removeChild(renderer.domElement)
     },

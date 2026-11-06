@@ -1,14 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import Box3D from '../components/Box3D'
-import { Icon, Sheet, Stepper, toast } from '../components/UI'
-import { fmt, fmtDate, summarize } from '../lib/calc'
+import { Icon, Stepper, toast } from '../components/UI'
+import { PALLET_H, fmt, fmtDate, maxLayers, maxPerLayer, summarize } from '../lib/calc'
 import {
   DEFAULT_LAYERS,
   DEFAULT_PER_LAYER,
   addPallet,
-  addPalletsByBoxes,
   createOrder,
   customerById,
+  nickOf,
   palletBoxes,
   removeOrder,
   removePallet,
@@ -36,12 +36,7 @@ export function specOfOrder(db: ReturnType<typeof useDB>, order: Order): PalletS
   return out
 }
 
-/* ---------- 新建车次 ---------- */
-
-/** 一块满板装多少箱 */
-const FULL_PALLET = DEFAULT_LAYERS * DEFAULT_PER_LAYER
-
-type DraftItem = { key: string; skuId: string; prodDate: string; boxes: number }
+/* ---------- 新建车次：只定「谁、送到哪」 ---------- */
 
 function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
   const db = useDB()
@@ -58,80 +53,13 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
 
   const [destination, setDestination] = useState('')
   const [customerId, setCustomerId] = useState('')
-  const [skuId, setSkuId] = useState('')
-  const [prodDate, setProdDate] = useState('')
-  const [boxes, setBoxes] = useState(FULL_PALLET)
-  const [items, setItems] = useState<DraftItem[]>([])
-
-  const skus = customerId ? skusOfCustomer(db, customerId) : []
-  const sku = skus.find((s) => s.id === skuId) ?? null
-  const dates = sku ? stockByDate(db, sku.id) : []
-  const picked = dates.find((d) => d.prodDate === prodDate)
-
-  const boxesOf = (qty: number, perBox: number) => Math.floor(qty / (perBox || 1))
-
-  const totalBoxes = items.reduce((n, i) => n + i.boxes, 0)
-  const totalQty = items.reduce((n, i) => {
-    const k = db.skus.find((s) => s.id === i.skuId)
-    return n + i.boxes * (k?.perBox ?? 0)
-  }, 0)
-
-  const pickCustomer = (id: string) => {
-    setCustomerId(id)
-    setSkuId('')
-    setProdDate('')
-  }
-
-  /** 这个日期账面上有多少箱 */
-  const leftBoxes = picked && sku ? boxesOf(picked.left, sku.perBox) : 0
-  /** 同一车已经占掉的箱数（同一个品 + 同一个日期） */
-  const takenBoxes = useMemo(() => {
-    if (!sku || !prodDate) return 0
-    return items
-      .filter((i) => i.skuId === sku.id && i.prodDate === prodDate)
-      .reduce((n, i) => n + i.boxes, 0)
-  }, [items, sku, prodDate])
-  /** 这次最多还能装多少箱 */
-  const avail = Math.max(0, leftBoxes - takenBoxes)
-
-  const pickSku = (id: string) => {
-    setSkuId(id)
-    const list = stockByDate(db, id)
-    const first = list[0]?.prodDate ?? ''
-    setProdDate(first)
-    // 默认箱数取「满板」和「这个日期还剩多少箱」里小的那个，免得一上来就超库存
-    const k = db.skus.find((s) => s.id === id)
-    const cap = first ? Math.floor((list[0]?.left ?? 0) / (k?.perBox || 1)) : 0
-    setBoxes(cap > 0 ? Math.min(FULL_PALLET, cap) : FULL_PALLET)
-  }
-
-  const addItem = () => {
-    if (!sku) return toast('先选一个品')
-    if (!prodDate) return toast('这个品还没有库存')
-    if (boxes <= 0) return toast('箱数要大于 0')
-    // 同一车、同一个品同一个日期可能已经加过板，先把已占的扣掉
-    if (boxes > avail) {
-      return toast(`库存不足：${fmtDate(prodDate)} 只剩 ${avail} 箱`)
-    }
-    setItems((p) => [...p, { key: `${Date.now()}-${Math.random()}`, skuId: sku.id, prodDate, boxes }])
-    // 收回到「选品」这一步，免得旧箱数对着新日期一直报超发
-    setSkuId('')
-    setProdDate('')
-    setBoxes(FULL_PALLET)
-    toast('已加入订单')
-  }
 
   const create = () => {
     if (!destination.trim()) return toast('先填收货地')
     if (!customerId) return toast('先选收货方')
     const id = createOrder({ destination: destination.trim(), customerId })
-    for (const it of items) {
-      addPalletsByBoxes(id, { skuId: it.skuId, prodDate: it.prodDate, boxes: it.boxes })
-    }
     onCreated(id)
   }
-
-  const over = picked && sku ? boxes - avail : 0
 
   return (
     <>
@@ -141,7 +69,7 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
             <Icon name="back" size={22} />
           </button>
           <h1>新建车次</h1>
-          <p className="sub">收货地 → 收货方 → 装什么 → 填箱数</p>
+          <p className="sub">先定送到哪、发给谁，装什么进场再说</p>
         </header>
 
         <div className="card card-pad">
@@ -175,43 +103,163 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
               <button
                 key={c.id}
                 className={`chip ${customerId === c.id ? 'on' : ''}`}
-                onClick={() => pickCustomer(c.id)}
+                onClick={() => setCustomerId(c.id)}
               >
                 {c.name}
               </button>
             ))}
           </div>
+          <div className="hint" style={{ margin: '12px 2px 0' }}>
+            一趟车只发一个收货方。建好之后直接进展板界面，装多少板当场看着码。
+          </div>
         </div>
 
-        {customerId && (
-          <div className="card card-pad" style={{ marginTop: 8 }}>
-            <label className="field-label">3 · 装什么</label>
-            <div className="pick-list">
-              {skus.map((s) => {
-                const left = stockByDate(db, s.id).reduce((n, d) => n + d.left, 0)
-                return (
-                  <button
-                    key={s.id}
-                    className={`pick-row ${skuId === s.id ? 'on' : ''}`}
-                    onClick={() => pickSku(s.id)}
-                  >
-                    <span className="pick-swatch" style={{ background: s.accentColor }} />
-                    <span className="pick-main">
-                      <span className="pick-name">{s.shortName}</span>
-                      <span className="pick-spec">{s.spec}</span>
-                    </span>
-                    <span className={`pick-stock ${left > 0 ? '' : 'none'}`}>
-                      {left > 0 ? `${boxesOf(left, s.perBox)} 箱` : '无库存'}
-                    </span>
-                  </button>
-                )
-              })}
-              {skus.length === 0 && <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>}
+        <div style={{ height: 12 }} />
+      </div>
+
+      <div className="dock">
+        <button className="btn primary" onClick={create} disabled={!destination.trim() || !customerId}>
+          创建并开始装板
+        </button>
+      </div>
+    </>
+  )
+}
+
+/* ---------- 装板工作台 ---------- */
+
+/**
+ * 一块板一屏：上面 3D 实时反映码垛，下面调层数 / 每层个数 / 顶层个数。
+ * 点「装上」把这块定下来，清空成下一块空板，接着装。
+ */
+function PackingBoard({ order, editing, onBack }: { order: Order; editing: Pallet | null; onBack: () => void }) {
+  const db = useDB()
+  const skus = skusOfCustomer(db, order.customerId)
+
+  const [skuId, setSkuId] = useState(editing?.skuId ?? '')
+  const [prodDate, setProdDate] = useState(editing?.prodDate ?? '')
+  const [layers, setLayers] = useState(editing?.layers ?? DEFAULT_LAYERS)
+  const [perLayer, setPerLayer] = useState(editing?.perLayer ?? DEFAULT_PER_LAYER)
+  const [topCount, setTopCount] = useState(editing?.topCount ?? DEFAULT_PER_LAYER)
+
+  const sku = skus.find((s) => s.id === skuId) ?? null
+  const dates = sku ? stockByDate(db, sku.id) : []
+  const picked = dates.find((d) => d.prodDate === prodDate)
+
+  const perBox = sku?.perBox || 1
+  const top = Math.min(topCount, perLayer)
+  const boxes = sku ? Math.max(0, (layers - 1) * perLayer + top) : 0
+  const qty = boxes * perBox
+
+  /** 这个日期账面上还剩多少箱 */
+  const leftBoxes = Math.floor((picked?.left ?? 0) / perBox)
+  /** 别的板已经占掉的（同品 + 同日期） */
+  const taken = order.pallets
+    .filter((p) => p.skuId === skuId && p.prodDate === prodDate && p.id !== editing?.id)
+    .reduce((n, p) => n + palletBoxes(p), 0)
+  const avail = Math.max(0, leftBoxes - taken)
+  const over = boxes - avail
+
+  /** 每层最多几个是硬的：托盘就那么大，塞不下就是悬空 */
+  const perCap = sku ? Math.max(maxPerLayer(sku), perLayer) : DEFAULT_PER_LAYER
+  /** 层数不设死上限，超了只提醒 —— 现场真有人码到 2 米 */
+  const softLayers = sku ? maxLayers(sku) : DEFAULT_LAYERS
+  const tooTall = layers > softLayers
+
+  const palletNo = editing?.no ?? `P${order.pallets.length + 1}`
+  const nextNo = `P${order.pallets.length + 2}`
+
+  const pick = (s: Sku) => {
+    setSkuId(s.id)
+    setProdDate(stockByDate(db, s.id)[0]?.prodDate ?? '')
+    // 起点按这个箱规在标准托盘上真能码多少算，不是拍一个「42 箱」
+    const pl = maxPerLayer(s)
+    setPerLayer(pl)
+    setLayers(maxLayers(s))
+    setTopCount(pl)
+  }
+
+  const putOn = () => {
+    if (!sku) return toast('先选装什么')
+    if (!prodDate) return toast('这个品还没有库存')
+    if (boxes <= 0) return toast('这一板还没码上箱子')
+    if (over > 0) return toast(`库存不足：${fmtDate(prodDate)} 还能装 ${avail} 箱`)
+
+    const payload = { skuId, prodDate, layers, perLayer, topCount: top }
+    if (editing) {
+      updatePallet(order.id, editing.id, payload)
+      toast(`${editing.no} 已改好`)
+      onBack()
+      return
+    }
+    addPallet(order.id, payload)
+    toast(`${palletNo} 已上车，接着装 ${nextNo}`)
+    // 清空选品，3D 回到一块空托盘 —— 这就是「自动跳到下一板」
+    setSkuId('')
+    setProdDate('')
+  }
+
+  const spec = sku ? [{ no: palletNo, sku, layers, perLayer, topCount: top }] : []
+  const stackH = sku ? (layers * sku.boxH + PALLET_H) / 1000 : 0
+
+  return (
+    <>
+      <div className="page pack-page">
+        <header className="topbar back-mode">
+          <button className="icon-btn" onClick={onBack} aria-label="返回">
+            <Icon name="back" size={22} />
+          </button>
+          <h1>
+            {palletNo}
+            {editing ? ' · 改这块' : ''}
+          </h1>
+          <p className="sub">
+            {order.destination} · 已装 {order.pallets.length} 板
+          </p>
+        </header>
+
+        <div className="pack-stage">
+          <Box3D pallets={spec} emptyPallet />
+          <div className="pack-hud">
+            <div className="hud-main">
+              {sku ? (
+                <>
+                  <span>{nickOf(sku)}</span>
+                  <b>{boxes} 箱</b>
+                  <em>{qty} 件</em>
+                </>
+              ) : (
+                <span>还没选品</span>
+              )}
             </div>
+            {sku && (
+              <div className={`hud-sub ${tooTall ? 'warn' : ''}`}>
+                {tooTall
+                  ? `码高 ${fmt(stackH, 2)} m，超过 1.8 m 上限`
+                  : prodDate
+                    ? `这天还能装 ${avail} 箱`
+                    : '这个品还没有库存'}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="pack-panel">
+          <div className="card card-pad">
+            <label className="field-label">装什么</label>
+            <div className="chips">
+              {skus.map((s) => (
+                <button key={s.id} className={`chip ${skuId === s.id ? 'on' : ''}`} onClick={() => pick(s)}>
+                  <span className="chip-dot" style={{ background: s.accentColor }} />
+                  {nickOf(s)}
+                </button>
+              ))}
+            </div>
+            {skus.length === 0 && <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>}
 
             {sku && dates.length > 0 && (
               <>
-                <label className="field-label" style={{ marginTop: 16 }}>
+                <label className="field-label" style={{ marginTop: 14 }}>
                   生产日期
                 </label>
                 <div className="chips">
@@ -222,291 +270,66 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
                       onClick={() => setProdDate(d.prodDate)}
                     >
                       {fmtDate(d.prodDate)}
-                      <em>{boxesOf(d.left, sku.perBox)}</em>
                     </button>
                   ))}
                 </div>
-
-                <label className="field-label" style={{ marginTop: 16 }}>
-                  箱数
-                </label>
-                <div className="box-row">
-                  <button className="btn sm" onClick={() => setBoxes(Math.max(0, boxes - 1))} aria-label="减少一箱">
-                    −
-                  </button>
-                  <input
-                    className="input num"
-                    inputMode="numeric"
-                    value={boxes || ''}
-                    onChange={(e) => setBoxes(Math.max(0, Number(e.target.value) || 0))}
-                    placeholder="0"
-                  />
-                  <button className="btn sm" onClick={() => setBoxes(boxes + 1)} aria-label="增加一箱">
-                    +
-                  </button>
-                  <button className="btn sm" onClick={() => setBoxes(FULL_PALLET)}>
-                    满板
-                  </button>
-                </div>
-
-                <div className="stack-sum" style={{ marginTop: 12 }}>
-                  <div>
-                    <b>{boxes}</b>
-                    <span>箱</span>
-                  </div>
-                  <div>
-                    <b>{boxes * sku.perBox}</b>
-                    <span>件</span>
-                  </div>
-                  <div>
-                    <b style={{ color: over > 0 ? 'var(--danger)' : undefined }}>{avail - boxes}</b>
-                    <span>该日期剩余</span>
-                  </div>
-                </div>
-
-                {over > 0 && (
-                  <div className="alert" style={{ margin: '10px 0 0' }}>
-                    库存不足：{fmtDate(prodDate)} 还能装 {avail} 箱
-                    {takenBoxes > 0 ? `（本车已占 ${takenBoxes} 箱）` : ''}，请减少 {over} 箱
-                  </div>
-                )}
-                {boxes > FULL_PALLET && over <= 0 && (
-                  <div className="hint" style={{ margin: '8px 2px 0' }}>
-                    {boxes} 箱会自动装成 {Math.ceil(boxes / FULL_PALLET)} 块板（整板 {FULL_PALLET} 箱）
-                  </div>
-                )}
-
-                <button
-                  className="btn primary"
-                  style={{ marginTop: 14 }}
-                  onClick={addItem}
-                  disabled={over > 0 || boxes <= 0}
-                >
-                  加入订单
-                </button>
               </>
             )}
 
             {sku && dates.length === 0 && (
-              <div className="hint" style={{ margin: '10px 2px 0' }}>
+              <div className="hint" style={{ margin: '12px 2px 0' }}>
                 这个品还没有库存，先去「库存」入库再发
               </div>
             )}
           </div>
-        )}
 
-        {items.length > 0 && (
-          <>
-            <div className="section-head">
-              <span>已加入 {items.length} 项</span>
-              <span className="num">
-                {totalBoxes} 箱 · {totalQty} 件
-              </span>
-            </div>
-            {items.map((it) => {
-              const k = db.skus.find((s) => s.id === it.skuId)
-              const pallets = Math.max(1, Math.ceil(it.boxes / FULL_PALLET))
-              return (
-                <div className="card card-pad pallet-card" key={it.key}>
-                  <div className="pallet-head">
-                    <span className="pallet-name">{k?.shortName ?? '—'}</span>
-                    <span className="pallet-boxes">{it.boxes} 箱</span>
-                  </div>
-                  <div className="pallet-meta">
-                    <span className="dot" style={{ background: k?.accentColor ?? '#999' }} />
-                    {fmtDate(it.prodDate)} · {it.boxes * (k?.perBox ?? 0)} 件 · {pallets} 块板
-                  </div>
-                  <div className="pallet-actions">
-                    <button
-                      className="btn sm"
-                      onClick={() => setItems((p) => p.filter((x) => x.key !== it.key))}
-                    >
-                      删掉
-                    </button>
-                  </div>
+          {sku && (
+            <>
+              <div className="card card-pad">
+                <div className="pack-row">
+                  <span>层数</span>
+                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
                 </div>
-              )
-            })}
-          </>
-        )}
+                <div className="pack-row">
+                  <span>
+                    每层几个
+                    <em className="pack-cap">最多 {maxPerLayer(sku)}</em>
+                  </span>
+                  <Stepper
+                    value={perLayer}
+                    min={1}
+                    max={perCap}
+                    onChange={(v) => {
+                      setPerLayer(v)
+                      setTopCount((t) => Math.min(t, v))
+                    }}
+                  />
+                </div>
+                <div className="pack-row">
+                  <span>最上层几个</span>
+                  <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
+                </div>
+              </div>
 
-        <div style={{ height: 12 }} />
+              {over > 0 && (
+                <div className="alert" style={{ margin: '10px 0 0' }}>
+                  库存不足：{fmtDate(prodDate)} 还能装 {avail} 箱
+                  {taken > 0 ? `（本车已占 ${taken} 箱）` : ''}，请减少 {over} 箱
+                </div>
+              )}
+            </>
+          )}
+
+          <div style={{ height: 8 }} />
+        </div>
       </div>
 
       <div className="dock">
-        <button className="btn primary" onClick={create} disabled={!destination.trim() || !customerId}>
-          {items.length > 0 ? `创建车次（${totalBoxes} 箱）` : '创建车次'}
+        <button className="btn primary" onClick={putOn} disabled={!sku || boxes <= 0 || over > 0}>
+          {editing ? `保存 ${palletNo}` : `装上 ${palletNo} · 接着装 ${nextNo}`}
         </button>
       </div>
     </>
-  )
-}
-
-/* ---------- 加 / 改一块拖板 ---------- */
-
-function PalletSheet({
-  open,
-  order,
-  editing,
-  onClose,
-}: {
-  open: boolean
-  order: Order
-  editing: Pallet | null
-  onClose: () => void
-}) {
-  const db = useDB()
-  const skus = skusOfCustomer(db, order.customerId)
-
-  const [skuId, setSkuId] = useState(editing?.skuId ?? '')
-  const [prodDate, setProdDate] = useState(editing?.prodDate ?? '')
-  const [layers, setLayers] = useState(editing?.layers ?? DEFAULT_LAYERS)
-  const [perLayer, setPerLayer] = useState(editing?.perLayer ?? DEFAULT_PER_LAYER)
-  const [topCount, setTopCount] = useState(editing?.topCount ?? DEFAULT_PER_LAYER)
-
-  const sku = skus.find((s) => s.id === skuId)
-  const dates = sku ? stockByDate(db, sku.id) : []
-  const top = Math.min(topCount, perLayer)
-  const boxes = Math.max(0, (layers - 1) * perLayer + top)
-  const qty = sku ? boxes * sku.perBox : 0
-  const picked = dates.find((d) => d.prodDate === prodDate)
-  /** 这个日期账面上还剩多少箱 */
-  const leftBoxes = sku ? Math.floor((picked?.left ?? 0) / (sku.perBox || 1)) : 0
-  /** 同一车、同一个品同一个日期，别的板已经占掉的 */
-  const takenBoxes = order.pallets
-    .filter((p) => p.skuId === skuId && p.prodDate === prodDate && p.id !== editing?.id)
-    .reduce((n, p) => n + palletBoxes(p), 0)
-  /** 这块板最多能装多少箱 */
-  const avail = Math.max(0, leftBoxes - takenBoxes)
-
-  const pickSku = (id: string) => {
-    setSkuId(id)
-    setProdDate(stockByDate(db, id)[0]?.prodDate ?? '')
-  }
-
-  const save = () => {
-    if (!sku) return toast('先选一个品')
-    if (!prodDate) return toast('这个品还没有库存')
-    if (boxes <= 0) return toast('箱数要大于 0')
-    if (boxes > avail) return toast(`库存不足：这个日期最多只能装 ${avail} 箱`)
-    const payload = { skuId, prodDate, layers, perLayer, topCount: top }
-    if (editing) updatePallet(order.id, editing.id, payload)
-    else addPallet(order.id, payload)
-    onClose()
-    toast(editing ? '已更新拖板' : '已加到车上')
-  }
-
-  return (
-    <Sheet open={open} title={editing ? `编辑 ${editing.no}` : '加一块拖板'} onClose={onClose}>
-      {!editing && (
-        <>
-          <label className="field-label">装什么</label>
-          <div className="pick-list">
-            {skus.map((s) => {
-              const left = stockByDate(db, s.id).reduce((sum, d) => sum + d.left, 0)
-              return (
-                <button key={s.id} className={`pick-row ${skuId === s.id ? 'on' : ''}`} onClick={() => pickSku(s.id)}>
-                  <span className="pick-swatch" style={{ background: s.accentColor }} />
-                  <span className="pick-main">
-                    <span className="pick-name">{s.shortName}</span>
-                    <span className="pick-spec">{s.spec}</span>
-                  </span>
-                  <span className={`pick-stock ${left > 0 ? '' : 'none'}`}>
-                    {left > 0 ? `${Math.floor(left / (s.perBox || 1))} 箱` : '无库存'}
-                  </span>
-                </button>
-              )
-            })}
-            {skus.length === 0 && <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>}
-          </div>
-        </>
-      )}
-
-      {editing && sku && (
-        <div className="edit-head">
-          <span className="pick-swatch" style={{ background: sku.accentColor }} />
-          <span>
-            <b>{sku.shortName}</b>
-            <em>{sku.spec}</em>
-          </span>
-        </div>
-      )}
-
-      {sku && (
-        <>
-          <label className="field-label" style={{ marginTop: 18 }}>
-            生产日期
-          </label>
-          {dates.length > 0 ? (
-            <div className="chips">
-              {dates.map((d) => (
-                <button
-                  key={d.prodDate}
-                  className={`chip ${prodDate === d.prodDate ? 'on' : ''}`}
-                  onClick={() => setProdDate(d.prodDate)}
-                >
-                  {fmtDate(d.prodDate)}
-                  <em>{Math.floor(d.left / (sku.perBox || 1))}</em>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="hint">这个品还没有库存，先去「库存」入库</div>
-          )}
-
-          <div className="stack-box">
-            <div className="stack-row">
-              <span>层数</span>
-              <Stepper value={layers} onChange={(v) => setLayers(Math.max(1, Math.min(20, v)))} min={1} />
-            </div>
-            <div className="stack-row">
-              <span>每层几个</span>
-              <Stepper
-                value={perLayer}
-                onChange={(v) => {
-                  const n = Math.max(1, Math.min(20, v))
-                  setPerLayer(n)
-                  setTopCount((t) => Math.min(t, n))
-                }}
-                min={1}
-              />
-            </div>
-            <div className="stack-row">
-              <span>顶层几个</span>
-              <Stepper value={top} onChange={(v) => setTopCount(Math.max(0, Math.min(perLayer, v)))} min={0} />
-            </div>
-          </div>
-
-          <div className="stack-sum">
-            <div>
-              <b>{boxes}</b>
-              <span>箱</span>
-            </div>
-            <div>
-              <b>{qty}</b>
-              <span>件</span>
-            </div>
-            <div>
-              <b style={{ color: boxes > avail ? 'var(--danger)' : undefined }}>{avail}</b>
-              <span>该日期可装</span>
-            </div>
-          </div>
-
-          {picked && boxes > avail && (
-            <div className="alert" style={{ margin: '10px 0 0' }}>
-              库存不足：这个日期最多装 {avail} 箱
-              {takenBoxes > 0 ? `（本车已占 ${takenBoxes} 箱）` : ''}，请减少 {boxes - avail} 箱
-            </div>
-          )}
-        </>
-      )}
-
-      <div className="sheet-actions">
-        <button className="btn primary" onClick={save} disabled={!sku || !prodDate || boxes > avail}>
-          {editing ? '保存' : '加到车上'}
-        </button>
-      </div>
-    </Sheet>
   )
 }
 
@@ -546,7 +369,7 @@ export function Viewer3D({
       <div className="viewer-info">
         {sum.lines.slice(0, 4).map((l) => (
           <div key={`${l.sku.id}-${l.prodDate}`}>
-            <span>{l.sku.shortName}</span>
+            <span>{nickOf(l.sku)}</span>
             <em>{fmtDate(l.prodDate)}</em>
             <b>{l.boxes} 箱</b>
           </div>
@@ -569,13 +392,14 @@ export default function Load() {
   const draft = useMemo(() => db.orders.find((o) => o.status === 'draft') ?? null, [db.orders])
 
   const [creating, setCreating] = useState(false)
-  const [picking, setPicking] = useState(false)
-  const [editing, setEditing] = useState<Pallet | null>(null)
+  /** 非空表示正在装板；editId 有值是改已有的板，没有就是在装新的一块 */
+  const [packing, setPacking] = useState<{ editId?: string } | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
   /** 刚发完车的单：单据已经不是草稿了，但 3D 要接着展示 */
   const [shippedPreview, setShippedPreview] = useState<Order | null>(null)
 
   const sum = draft ? summarize(db, draft) : null
+  const editingPallet = packing?.editId ? (draft?.pallets.find((p) => p.id === packing.editId) ?? null) : null
 
   const confirmShip = () => {
     if (!draft) return
@@ -584,7 +408,7 @@ export default function Load() {
     if (short.length > 0) {
       const msg = short
         .slice(0, 3)
-        .map((s) => `${s.sku.shortName} ${fmtDate(s.prodDate)} 差 ${Math.ceil(s.short / (s.sku.perBox || 1))} 箱`)
+        .map((s) => `${nickOf(s.sku)} ${fmtDate(s.prodDate)} 差 ${Math.ceil(s.short / (s.sku.perBox || 1))} 箱`)
         .join('\n')
       alert(`库存不足，不能发车：\n${msg}\n\n请减少箱数，或先入库再发。`)
       return
@@ -601,8 +425,20 @@ export default function Load() {
         onCancel={() => setCreating(false)}
         onCreated={() => {
           setCreating(false)
-          toast('车次已建好')
+          // 建好直接进 3D 装板，不用再点一次
+          setPacking({})
         }}
+      />
+    )
+  }
+
+  if (draft && packing) {
+    return (
+      <PackingBoard
+        key={packing.editId ?? 'new'}
+        order={draft}
+        editing={editingPallet}
+        onBack={() => setPacking(null)}
       />
     )
   }
@@ -622,9 +458,9 @@ export default function Load() {
               </div>
               <div className="es-title">今天要发哪一车？</div>
               <div className="es-body">
-                填收货地、选收货方，一块板一块板装
+                填收货地、选收货方，直接开装
                 <br />
-                每板一种商品、一个生产日期
+                一板一种商品、一个生产日期
               </div>
               <button className="btn primary" onClick={() => setCreating(true)}>
                 新建车次
@@ -686,10 +522,10 @@ export default function Load() {
         )}
 
         <div className="section-head">
-          <span>拖板清单</span>
+          <span>已上车 {draft.pallets.length} 板</span>
           {draft.pallets.length > 0 && (
             <button className="link-btn" onClick={() => setViewerOpen(true)}>
-              看 3D
+              看整车 3D
             </button>
           )}
         </div>
@@ -701,17 +537,17 @@ export default function Load() {
             <div className="card card-pad pallet-card" key={p.id}>
               <div className="pallet-head">
                 <span className="pallet-no">{p.no}</span>
-                <span className="pallet-name">{sku?.shortName ?? '品项已删除'}</span>
+                <span className="pallet-name">{sku ? nickOf(sku) : '品项已删除'}</span>
                 <span className="pallet-boxes">{boxes} 箱</span>
               </div>
               <div className="pallet-meta">
                 <span className="dot" style={{ background: sku?.accentColor ?? '#999' }} />
                 {fmtDate(p.prodDate)} · {p.layers} 层 × {p.perLayer}
-                {p.topCount !== p.perLayer ? ` + 顶层 ${p.topCount}` : ''} · {sku ? boxes * sku.perBox : 0} 件
+                {p.topCount !== p.perLayer ? ` · 顶层 ${p.topCount}` : ''} · {sku ? boxes * sku.perBox : 0} 件
               </div>
               <div className="pallet-actions">
-                <button className="btn sm" onClick={() => setEditing(p)}>
-                  改层数
+                <button className="btn sm" onClick={() => setPacking({ editId: p.id })}>
+                  重码
                 </button>
                 <button
                   className="btn sm"
@@ -727,8 +563,8 @@ export default function Load() {
           )
         })}
 
-        <button className="btn" style={{ marginTop: 12 }} onClick={() => setPicking(true)}>
-          + 加一块拖板
+        <button className="btn" style={{ marginTop: 12 }} onClick={() => setPacking({})}>
+          + 继续装板（P{draft.pallets.length + 1}）
         </button>
 
         <div style={{ height: 12 }} />
@@ -739,9 +575,6 @@ export default function Load() {
           确认发车（扣库存）
         </button>
       </div>
-
-      {picking && <PalletSheet open order={draft} editing={null} onClose={() => setPicking(false)} />}
-      {editing && <PalletSheet key={editing.id} open order={draft} editing={editing} onClose={() => setEditing(null)} />}
 
       <Viewer3D open={viewerOpen} order={draft} onClose={() => setViewerOpen(false)} />
     </>

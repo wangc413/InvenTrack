@@ -18,6 +18,8 @@ export type Sku = {
   spec: string
   /** 箱面大字 */
   shortName: string
+  /** 列表 / 标签里的短称，如「肉包」「菜包」；不填就按箱面大字推一个 */
+  nick?: string
   /** 每箱装多少件（袋 / 盒） */
   perBox: number
   /** 外箱三围，毫米 */
@@ -134,6 +136,24 @@ export const palletBoxes = (p: Pallet) =>
 /** 默认每层 6 箱、7 层 —— 仓库里最常见的一种码法 */
 export const DEFAULT_LAYERS = 7
 export const DEFAULT_PER_LAYER = 6
+
+/** 从箱面大字里猜一个短称：鲜汁大肉包 → 肉包 */
+const NICK_RULES: [RegExp, string][] = [
+  [/烧麦/, '烧麦'],
+  [/肉包/, '肉包'],
+  [/菜包/, '菜包'],
+  [/花卷/, '花卷'],
+  [/馒头/, '馒头'],
+  [/饺子/, '饺子'],
+  [/馄饨/, '馄饨'],
+]
+
+/** 列表、标签上用的短称 */
+export function nickOf(sku: Sku) {
+  if (sku.nick?.trim()) return sku.nick.trim()
+  const hit = NICK_RULES.find(([re]) => re.test(sku.shortName))
+  return hit ? hit[1] : sku.shortName.slice(0, 4)
+}
 
 export const CUSTOMER_HM = 'c-hm'
 export const CUSTOMER_KLH = 'c-klh'
@@ -850,50 +870,6 @@ export function addPallet(orderId: string, input: Omit<Pallet, 'id' | 'no' | 'cr
     }),
   })
   return id
-}
-
-/**
- * 按箱数加板：先按满板（默认 7 层 × 6 个 = 42 箱）整板装，余数再按层数 + 顶层码。
- * 返回加入的板数。
- */
-export function addPalletsByBoxes(
-  orderId: string,
-  input: { skuId: string; prodDate: string; boxes: number; perLayer?: number; maxLayers?: number },
-) {
-  const perLayer = input.perLayer ?? DEFAULT_PER_LAYER
-  const maxLayers = input.maxLayers ?? DEFAULT_LAYERS
-  const perPallet = perLayer * maxLayers
-
-  const shapes: { layers: number; perLayer: number; topCount: number }[] = []
-  const full = Math.floor(input.boxes / perPallet)
-  for (let i = 0; i < full; i++) shapes.push({ layers: maxLayers, perLayer, topCount: perLayer })
-
-  const rest = input.boxes - full * perPallet
-  if (rest > 0) {
-    const layers = Math.max(1, Math.ceil(rest / perLayer))
-    shapes.push({ layers, perLayer, topCount: rest - (layers - 1) * perLayer })
-  }
-  if (shapes.length === 0) return 0
-
-  commit({
-    ...state,
-    orders: state.orders.map((o) => {
-      if (o.id !== orderId) return o
-      const now = Date.now()
-      const added: Pallet[] = shapes.map((s, i) => ({
-        id: uid(),
-        no: `P${o.pallets.length + i + 1}`,
-        skuId: input.skuId,
-        prodDate: input.prodDate,
-        layers: s.layers,
-        perLayer: s.perLayer,
-        topCount: s.topCount,
-        createdAt: now,
-      }))
-      return { ...o, pallets: [...o.pallets, ...added] }
-    }),
-  })
-  return shapes.length
 }
 
 export function updatePallet(orderId: string, palletId: string, patch: Partial<Omit<Pallet, 'id'>>) {

@@ -1724,3 +1724,166 @@ textarea.input {
   background: var(--bg-elevated);
   border-top: 0.5px solid var(--line);
 }
+
+/* ---------- 装板工作台 ---------- */
+
+/* 上面 3D 固定，下面控件自己滚，调层数时画面一直在 */
+.page.pack-page {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.pack-stage {
+  position: relative;
+  flex: 0 0 auto;
+  height: clamp(180px, 30vh, 280px);
+  background: linear-gradient(180deg, #f5f5f7 0%, #e8e8ec 100%);
+  overflow: hidden;
+  border-bottom: 0.5px solid var(--line);
+}
+
+.pack-stage .box3d {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  background: transparent;
+}
+
+.pack-hud {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 13px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.07);
+  font-size: 13px;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  max-width: 74%;
+  overflow: hidden;
+}
+
+.pack-hud .hud-main {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.pack-hud .hud-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pack-hud .hud-main b {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pack-hud .hud-main em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.pack-hud .hud-sub {
+  font-size: 11.5px;
+  line-height: 1.3;
+  letter-spacing: 0;
+  color: var(--sub);
+  white-space: nowrap;
+}
+
+.pack-hud .hud-sub.warn {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+/* 层数行里的小字提示 */
+.pack-cap {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--sub);
+  margin-left: 8px;
+}
+
+/* 装板页的重置键挪到右上，底部留给信息条 */
+.pack-stage .box3d-reset {
+  top: 12px;
+  bottom: auto;
+  right: 12px;
+}
+
+.pack-panel {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 0 16px calc(82px + env(safe-area-inset-bottom));
+}
+
+.pack-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.pack-panel > .card:first-child {
+  margin-top: 12px;
+}
+
+.pack-panel > .card + .card {
+  margin-top: 8px;
+}
+
+.pack-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  letter-spacing: -0.2px;
+  padding: 6px 0;
+}
+
+.pack-row + .pack-row {
+  border-top: 0.5px solid var(--line);
+}
+
+.pack-note {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: var(--sub);
+  text-wrap: pretty;
+}
+
+/* 品类标签上的色点 */
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* 装板页底部有 HUD 和重置键，手势提示让位 */
+.pack-stage .box3d-hint {
+  display: none;
+}
+
+.stepper button:disabled {
+  color: var(--line-strong, rgba(60, 60, 67, 0.18));
+  pointer-events: none;
+}
+
+.pack-note.warn {
+  color: var(--danger);
+}

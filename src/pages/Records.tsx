@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Icon, toast } from '../components/UI'
 import { fmt, fmtDate, fmtTime, summarize } from '../lib/calc'
-import { customerById, unshipOrder, useDB } from '../lib/store'
+import { customerById, nickOf, unshipOrder, useDB } from '../lib/store'
 import { Viewer3D } from './Load'
 
 export default function Records() {
@@ -60,7 +60,7 @@ export default function Records() {
               <div className="rec-lines">
                 {sum.lines.slice(0, 3).map((l) => (
                   <span key={`${l.sku.id}-${l.prodDate}`}>
-                    {l.sku.shortName}
+                    {nickOf(l.sku)}
                     <em>{fmtDate(l.prodDate)}</em>
                   </span>
                 ))}

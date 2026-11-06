@@ -50,19 +50,22 @@ export function Stepper({
   onChange,
   step = 1,
   min = 0,
+  max,
 }: {
   value: number
   onChange: (v: number) => void
   step?: number
   min?: number
+  max?: number
 }) {
+  const cap = max ?? Number.POSITIVE_INFINITY
   return (
     <div className="stepper">
-      <button onClick={() => onChange(Math.max(min, value - step))} aria-label="减少">
+      <button onClick={() => onChange(Math.max(min, value - step))} aria-label="减少" disabled={value <= min}>
         −
       </button>
       <div className="val num">{value}</div>
-      <button onClick={() => onChange(value + step)} aria-label="增加">
+      <button onClick={() => onChange(Math.min(cap, value + step))} aria-label="增加" disabled={value >= cap}>
         +
       </button>
     </div>
