@@ -3,6 +3,34 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { PALLET_L, PALLET_W, layerPlan, layerSlots } from './calc'
 import type { Sku } from './store'
 
+import meatFront from '../assets/pack/klh-meat-front.webp'
+import meatSide from '../assets/pack/klh-meat-side.webp'
+import meatTop from '../assets/pack/klh-meat-top.webp'
+import greenFront from '../assets/pack/klh-green-front.webp'
+import greenSide from '../assets/pack/klh-green-side.webp'
+import greenTop from '../assets/pack/klh-green-top.webp'
+import caiFront from '../assets/pack/klh-cai-front.webp'
+import caiSide from '../assets/pack/klh-cai-side.webp'
+import caiTop from '../assets/pack/klh-cai-top.webp'
+import jiaoFront from '../assets/pack/klh-jiao-front.webp'
+import jiaoSide from '../assets/pack/klh-jiao-side.webp'
+import jiaoTop from '../assets/pack/klh-jiao-top.webp'
+import nuoFront from '../assets/pack/klh-nuo-front.webp'
+import nuoSide from '../assets/pack/klh-nuo-side.webp'
+import nuoTop from '../assets/pack/klh-nuo-top.webp'
+
+/**
+ * 有外箱稿的品：直接用设计稿裁出来的三张贴图（正面 / 侧面 / 顶面），箱子就是印出来的样子。
+ * 没列在这里的品（盒马那三个）仍然走下面代码画出来的示意箱面。
+ */
+const PACK_ART: Record<string, { front: string; side: string; top: string }> = {
+  'sku-meat-klh': { front: meatFront, side: meatSide, top: meatTop },
+  'sku-green-klh': { front: greenFront, side: greenSide, top: greenTop },
+  'sku-caitianzi-klh': { front: caiFront, side: caiSide, top: caiTop },
+  'sku-jiaozi-klh': { front: jiaoFront, side: jiaoSide, top: jiaoTop },
+  'sku-nuomiji-klh': { front: nuoFront, side: nuoSide, top: nuoTop },
+}
+
 /** 全部按毫米建模，最后统一缩成米 */
 const MM = 0.001
 
@@ -27,6 +55,17 @@ export type SceneHandle = {
 }
 
 const VIEW_DIR = new THREE.Vector3(0.26, 0.62, 0.74).normalize()
+
+const texLoader = new THREE.TextureLoader()
+
+/** 设计稿按 sRGB 采样，开各向异性：斜看箱面时字不会糊成一片 */
+function artTexture(url: string) {
+  const t = texLoader.load(url)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = 4
+  t.minFilter = THREE.LinearMipmapLinearFilter
+  return t
+}
 
 /* ---------- 箱面纹理：照着外箱稿画一遍 ---------- */
 
@@ -228,8 +267,11 @@ export function mountBoxes(
   const wood = new THREE.MeshStandardMaterial({ color: 0xc7a97e, roughness: 0.94, metalness: 0 })
   const woodDark = new THREE.MeshStandardMaterial({ color: 0xb08f63, roughness: 0.96, metalness: 0 })
 
-  // 每种箱规只生成一次纹理与几何，多块板、多次重排共用
-  const cache = new Map<string, { geo: THREE.BoxGeometry; matSide: THREE.MeshStandardMaterial; matTop: THREE.MeshStandardMaterial }>()
+  /** 每种箱规只生成一次纹理与几何，多块板、多次重排共用 */
+  const cache = new Map<
+    string,
+    { geo: THREE.BoxGeometry; mats: THREE.Material[] }
+  >()
   const disposables: { dispose: () => void }[] = []
   /** 每次重排都会新建的几何（托盘），重排前要先释放 */
   let transient: Sink = []
@@ -242,20 +284,45 @@ export function mountBoxes(
     const bh = Math.max(50, sku.boxH) * MM * BOX_SHRINK
 
     const geo = new THREE.BoxGeometry(bl, bh, bw)
-    // 六个面重排成两组：侧面贴版面，顶面/底面用素色，一个箱子两次绘制
+    // 四个面各贴一张：±x 侧面、+y 顶面、-y 底面、±z 正面/背面
     geo.clearGroups()
-    geo.addGroup(0, 12, 1) // +x -x
-    geo.addGroup(12, 6, 0) // +y 顶
-    geo.addGroup(18, 6, 1) // -y 底
-    geo.addGroup(24, 12, 1) // +z -z
+    geo.addGroup(0, 12, 0)
+    geo.addGroup(12, 6, 1)
+    geo.addGroup(18, 6, 2)
+    geo.addGroup(24, 12, 3)
 
-    const tex = faceTexture(sku)
-    const topTex = topTexture(sku)
-    const matSide = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.86, metalness: 0 })
-    const matTop = new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.9 })
+    const art = PACK_ART[sku.id]
+    const paper = { roughness: 0.86, metalness: 0 }
 
-    disposables.push(geo, matSide, matTop, tex, topTex)
-    const asset = { geo, matSide, matTop }
+    let matSide: THREE.Material
+    let matFront: THREE.Material
+    let matTop: THREE.Material
+
+    if (art) {
+      // 设计稿：正面 / 侧面 / 顶面各一张，比例跟真实箱面一致，箱子就是印出来的样子
+      matFront = new THREE.MeshStandardMaterial({ map: artTexture(art.front), ...paper })
+      matSide = new THREE.MeshStandardMaterial({ map: artTexture(art.side), ...paper })
+      matTop = new THREE.MeshStandardMaterial({ map: artTexture(art.top), roughness: 0.9 })
+    } else {
+      const face = faceTexture(sku)
+      matFront = new THREE.MeshStandardMaterial({ map: face, ...paper })
+      matSide = matFront
+      matTop = new THREE.MeshStandardMaterial({ map: topTexture(sku), roughness: 0.9 })
+      disposables.push(face)
+    }
+
+    // 底面看不到，给个素色省一张贴图
+    const matBottom = new THREE.MeshStandardMaterial({ color: sku.boxColor, roughness: 0.92 })
+    const mats = [matSide, matTop, matBottom, matFront]
+
+    disposables.push(geo, matBottom, matTop, matFront)
+    if (matSide !== matFront) disposables.push(matSide)
+    for (const m of mats) {
+      const map = (m as THREE.MeshStandardMaterial).map
+      if (map) disposables.push(map)
+    }
+
+    const asset = { geo, mats }
     cache.set(sku.id, asset)
     return asset
   }
@@ -337,7 +404,7 @@ export function mountBoxes(
 
       group.add(makePalletMesh(palletL, palletW, wood, woodDark, transient))
 
-      const { geo, matSide, matTop } = assetFor(p.sku)
+      const { geo, mats } = assetFor(p.sku)
       // 位置完全照这个品的固定码法来：箱子怎么转、摆在哪，都是写好的
       const plan = layerPlan(p.sku)
       const full = Math.min(Math.max(1, p.perLayer), plan.slots.length)
@@ -351,7 +418,7 @@ export function mountBoxes(
         const count = layer === p.layers - 1 ? top : full
         for (let i = 0; i < count; i++) {
           const slot = slots[i]
-          const box = new THREE.Mesh(geo, [matTop, matSide])
+          const box = new THREE.Mesh(geo, mats)
           box.position.set(slot.x * MM, baseY + layer * stepH + stepH / 2, slot.z * MM)
           // 横的那几个转 90°，长边改顺着 1 m 那边
           if (slot.turn) box.rotation.y = Math.PI / 2
