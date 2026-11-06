@@ -8,6 +8,30 @@ export function boxify(qty: number, perBox: number) {
   return { full, tail, total: full + (tail > 0 ? 1 : 0) }
 }
 
+/** 件数拆成整箱 + 零头件（按绝对值拆，正负另看） */
+export function splitBoxes(qty: number, perBox: number) {
+  const per = perBox > 0 ? perBox : 1
+  const abs = Math.abs(qty)
+  const boxes = Math.floor(abs / per)
+  return { boxes, tail: abs - boxes * per }
+}
+
+/** 结存 / 余量的箱数文案：「42 箱」「41 箱 + 3 件」 */
+export function boxText(qty: number, perBox: number) {
+  const { boxes, tail } = splitBoxes(qty, perBox)
+  if (tail === 0) return `${boxes} 箱`
+  return boxes > 0 ? `${boxes} 箱 + ${tail} 件` : `${tail} 件`
+}
+
+/** 流水数量文案，带正负号：「+42 箱」「−6 箱」「+3 件」 */
+export function moveText(qty: number, perBox: number) {
+  if (qty === 0) return '0'
+  const sign = qty > 0 ? '+' : '−'
+  const { boxes, tail } = splitBoxes(qty, perBox)
+  if (tail === 0) return `${sign}${boxes} 箱`
+  return boxes > 0 ? `${sign}${boxes} 箱 ${tail} 件` : `${sign}${tail} 件`
+}
+
 /** 单箱体积，单位 m³（外箱尺寸按毫米存） */
 export function boxVolume(sku: Sku) {
   return (sku.boxL * sku.boxW * sku.boxH) / 1_000_000_000

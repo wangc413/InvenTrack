@@ -1057,18 +1057,20 @@ export function movesOf(db: DB, skuId: string, limit = 12) {
   return db.moves.filter((m) => m.skuId === skuId).slice(0, limit)
 }
 
-/** 今日入库 / 出库件数（退货算入，调整按正负各归一边） */
+/** 今日入库 / 出库箱数（退货算入，调整按正负各归一边；已撤销的流水不计） */
 export function todayFlow(db: DB) {
   const start = new Date()
   start.setHours(0, 0, 0, 0)
-  let inQty = 0
-  let outQty = 0
+  const perOf = new Map(db.skus.map((s) => [s.id, s.perBox > 0 ? s.perBox : 1]))
+  let inBoxes = 0
+  let outBoxes = 0
   for (const m of db.moves) {
-    if (m.at < start.getTime()) continue
-    if (m.qty > 0) inQty += m.qty
-    else outQty += -m.qty
+    if (m.at < start.getTime() || m.voided) continue
+    const per = perOf.get(m.skuId) ?? 1
+    if (m.qty > 0) inBoxes += m.qty / per
+    else outBoxes += -m.qty / per
   }
-  return { inQty, outQty }
+  return { inBoxes: Math.round(inBoxes * 10) / 10, outBoxes: Math.round(outBoxes * 10) / 10 }
 }
 
 export function findByCode(db: DB, code: string) {

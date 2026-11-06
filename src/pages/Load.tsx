@@ -349,6 +349,8 @@ function PalletSheet({
   const boxes = Math.max(0, (layers - 1) * perLayer + top)
   const qty = sku ? boxes * sku.perBox : 0
   const picked = dates.find((d) => d.prodDate === prodDate)
+  /** 这个日期还剩多少箱，可装 */
+  const leftBoxes = sku ? Math.floor((picked?.left ?? 0) / (sku.perBox || 1)) : 0
 
   const pickSku = (id: string) => {
     setSkuId(id)
@@ -380,7 +382,9 @@ function PalletSheet({
                     <span className="pick-name">{s.shortName}</span>
                     <span className="pick-spec">{s.spec}</span>
                   </span>
-                  <span className={`pick-stock ${left > 0 ? '' : 'none'}`}>{left > 0 ? `${left} 件` : '无库存'}</span>
+                  <span className={`pick-stock ${left > 0 ? '' : 'none'}`}>
+                    {left > 0 ? `${Math.floor(left / (s.perBox || 1))} 箱` : '无库存'}
+                  </span>
                 </button>
               )
             })}
@@ -454,14 +458,14 @@ function PalletSheet({
               <span>件</span>
             </div>
             <div>
-              <b>{picked ? picked.left - qty : 0}</b>
+              <b>{picked ? leftBoxes : 0}</b>
               <span>该日期剩余</span>
             </div>
           </div>
 
-          {picked && picked.left < qty && (
+          {picked && leftBoxes < boxes && (
             <div className="alert" style={{ margin: '10px 0 0' }}>
-              这个日期只有 {picked.left} 件，装完会超出 {qty - picked.left} 件
+              这个日期只有 {leftBoxes} 箱，装完会超出 {boxes - leftBoxes} 箱
             </div>
           )}
         </>
@@ -520,7 +524,7 @@ export function Viewer3D({
         <div className="viewer-total">
           <span>合计</span>
           <em>{fmt(sum.totalVolume, 2)} m³</em>
-          <b>{sum.totalQty} 件</b>
+          <b>{sum.totalBoxes} 箱</b>
         </div>
         {actions && <div className="viewer-actions">{actions}</div>}
       </div>
@@ -550,7 +554,7 @@ export default function Load() {
     if (short.length > 0) {
       const msg = short
         .slice(0, 3)
-        .map((s) => `${s.sku.shortName} ${fmtDate(s.prodDate)} 差 ${s.short} 件`)
+        .map((s) => `${s.sku.shortName} ${fmtDate(s.prodDate)} 差 ${Math.ceil(s.short / (s.sku.perBox || 1))} 箱`)
         .join('\n')
       if (!confirm(`这些货不够：\n${msg}\n\n仍然发车？缺口会记成超发。`)) return
     }

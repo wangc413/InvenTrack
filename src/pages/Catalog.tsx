@@ -10,6 +10,7 @@ import {
   type Sku,
 } from '../lib/store'
 import SkuForm from '../components/SkuForm'
+import { boxText } from '../lib/calc'
 import { Icon, Sheet, toast } from '../components/UI'
 
 /* ---------- 客户 ---------- */
@@ -146,9 +147,9 @@ export default function Catalog() {
                         </div>
                       </div>
                       <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
-                        <div className="tag info">每箱 {s.perBox}</div>
+                        <div className="tag info">每箱 {s.perBox} 件</div>
                         <div className="meta num" style={{ marginTop: 4 }}>
-                          存 {stockOf(db, s.id)}
+                          存 {boxText(stockOf(db, s.id), s.perBox)}
                         </div>
                       </div>
                     </div>

@@ -1032,7 +1032,7 @@ textarea.input {
 
 .flow-row {
   display: grid;
-  grid-template-columns: 76px 34px 60px 1fr;
+  grid-template-columns: 76px 34px auto 1fr;
   align-items: center;
   gap: 6px;
   font-size: 12px;
@@ -1047,6 +1047,7 @@ textarea.input {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.2px;
+  white-space: nowrap;
 }
 .flow-qty.plus {
   color: var(--ok);
