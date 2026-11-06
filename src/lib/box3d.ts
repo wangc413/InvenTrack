@@ -18,12 +18,26 @@ import jiaoTop from '../assets/pack/klh-jiao-top.webp'
 import nuoFront from '../assets/pack/klh-nuo-front.webp'
 import nuoSide from '../assets/pack/klh-nuo-side.webp'
 import nuoTop from '../assets/pack/klh-nuo-top.webp'
+import hmMeatFront from '../assets/pack/hm-meat-front.webp'
+import hmMeatSide from '../assets/pack/hm-meat-side.webp'
+import hmMeatTop from '../assets/pack/hm-meat-top.webp'
+import hmGreenFront from '../assets/pack/hm-green-front.webp'
+import hmGreenSide from '../assets/pack/hm-green-side.webp'
+import hmGreenTop from '../assets/pack/hm-green-top.webp'
+import hmShaoFront from '../assets/pack/hm-shao-front.webp'
+import hmShaoSide from '../assets/pack/hm-shao-side.webp'
+import hmShaoTop from '../assets/pack/hm-shao-top.webp'
 
 /**
  * 有外箱稿的品：直接用设计稿裁出来的三张贴图（正面 / 侧面 / 顶面），箱子就是印出来的样子。
- * 没列在这里的品（盒马那三个）仍然走下面代码画出来的示意箱面。
+ * 没列在这里的品（比如菜洋洋、自己新建的）仍然走下面代码画出来的示意箱面。
  */
 const PACK_ART: Record<string, { front: string; side: string; top: string }> = {
+  // 盒马
+  'sku-meat': { front: hmMeatFront, side: hmMeatSide, top: hmMeatTop },
+  'sku-green': { front: hmGreenFront, side: hmGreenSide, top: hmGreenTop },
+  'sku-shaomai': { front: hmShaoFront, side: hmShaoSide, top: hmShaoTop },
+  // 快乐猴
   'sku-meat-klh': { front: meatFront, side: meatSide, top: meatTop },
   'sku-green-klh': { front: greenFront, side: greenSide, top: greenTop },
   'sku-caitianzi-klh': { front: caiFront, side: caiSide, top: caiTop },
@@ -62,12 +76,12 @@ const texLoader = new THREE.TextureLoader()
 function artTexture(url: string) {
   const t = texLoader.load(url)
   t.colorSpace = THREE.SRGBColorSpace
-  t.anisotropy = 4
+  t.anisotropy = 8
   t.minFilter = THREE.LinearMipmapLinearFilter
   return t
 }
 
-/* ---------- 箱面纹理：照着外箱稿画一遍 ---------- */
+/* ---------- 箱面纹理：没有外箱稿的品，按箱规画一套印刷箱面 ---------- */
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath()
@@ -79,6 +93,71 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath()
 }
 
+/** #rrggbb 调亮 / 调暗，k > 1 变亮、k < 1 变暗 */
+function shade(hex: string, k: number) {
+  const h = hex.replace('#', '')
+  const n = parseInt(h.length === 3 ? h.replace(/(.)/g, '$1$1') : h, 16)
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) =>
+    Math.max(0, Math.min(255, Math.round(k >= 1 ? v + (255 - v) * (k - 1) : v * k))),
+  )
+  return `rgb(${ch[0]},${ch[1]},${ch[2]})`
+}
+
+/** 牛皮纸底：底色 + 极淡纤维，远看是纸，近看不是一块死色 */
+function paper(ctx: CanvasRenderingContext2D, w: number, h: number, color: string) {
+  ctx.fillStyle = color
+  ctx.fillRect(0, 0, w, h)
+  let seed = 20261106
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  ctx.strokeStyle = 'rgba(0,0,0,0.028)'
+  ctx.lineWidth = 1
+  const n = Math.min(900, Math.round((w * h) / 2600))
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * w
+    const y = rnd() * h
+    const len = 5 + rnd() * 16
+    ctx.beginPath()
+    ctx.moveTo(x, y)
+    ctx.lineTo(x + len, y + (rnd() - 0.5) * 1.8)
+    ctx.stroke()
+  }
+}
+
+/** 条码：宽度随机的一排竖条，远看就是条码 */
+function barcode(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  let seed = 77
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  ctx.fillStyle = 'rgba(0,0,0,0.72)'
+  let cursor = x
+  while (cursor < x + w) {
+    const bw = Math.max(1, Math.round(w * (0.012 + rnd() * 0.03)))
+    if (rnd() > 0.42) ctx.fillRect(cursor, y, bw, h)
+    cursor += bw + Math.max(1, Math.round(w * 0.012))
+  }
+}
+
+/** 小字假文：挤成一团灰线，远看就是印刷的配料表 */
+function textLines(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, rows: number, size: number) {
+  ctx.fillStyle = 'rgba(0,0,0,0.34)'
+  let seed = 19
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  for (let r = 0; r < rows; r++) {
+    let cx = x
+    const lineW = w * (0.62 + rnd() * 0.36)
+    while (cx < x + lineW) {
+      const seg = size * (1.4 + rnd() * 2.6)
+      ctx.fillRect(cx, y + r * size * 1.75, Math.min(seg, x + lineW - cx), size * 0.62)
+      cx += seg + size * 0.5
+    }
+  }
+}
+
+const FONT = '-apple-system, "PingFang SC", "Microsoft YaHei", sans-serif'
+
+/**
+ * 正面（长 × 高）：牛皮底 + 底部品牌色带 + 品名大字 + 规格。
+ * 排版按箱面的长宽比缩放，换箱规不会溢出。
+ */
 function faceTexture(sku: Sku) {
   const W = 1024
   const ratio = sku.boxH / Math.max(1, sku.boxL)
@@ -87,48 +166,40 @@ function faceTexture(sku: Sku) {
   cv.width = W
   cv.height = H
   const ctx = cv.getContext('2d')!
+  const ink = shade(sku.accentColor, 0.5)
 
-  ctx.fillStyle = sku.boxColor
-  ctx.fillRect(0, 0, W, H)
+  paper(ctx, W, H, sku.boxColor)
 
-  // 封箱胶带：竖向一条略亮的带子
-  ctx.fillStyle = 'rgba(255,255,255,0.16)'
-  ctx.fillRect(W * 0.42, 0, W * 0.16, H)
-
-  // 下半部分品牌色块
-  const blockTop = H * 0.46
+  // 底部品牌色带，占 22%，跟外箱稿的比例接近
+  const bandH = Math.round(H * 0.22)
+  const bandTop = H - bandH
   ctx.fillStyle = sku.accentColor
-  ctx.fillRect(0, blockTop, W, H - blockTop)
+  ctx.fillRect(0, bandTop, W, bandH)
+  ctx.fillStyle = 'rgba(255,255,255,0.16)'
+  ctx.fillRect(0, bandTop, W, Math.max(1.5, H * 0.008))
 
-  // 色块顶部描一条细亮线，做出印刷层次
-  ctx.fillStyle = 'rgba(255,255,255,0.22)'
-  ctx.fillRect(0, blockTop, W, Math.max(2, H * 0.012))
-
-  // 品名
-  const nameSize = Math.min(H * 0.2, W * 0.105)
-  ctx.fillStyle = sku.textColor
-  ctx.font = `700 ${nameSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`
+  // 品名：顶到色带上方，够大才像"印上去的"
+  const nameSize = Math.min(bandTop * 0.42, W * 0.115)
+  ctx.fillStyle = ink
+  ctx.font = `700 ${nameSize}px ${FONT}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  const nameY = blockTop + (H - blockTop) * 0.42
-  ctx.fillText(sku.shortName, W / 2, nameY, W * 0.86)
+  ctx.fillText(sku.shortName, W / 2, bandTop * 0.52, W * 0.84)
 
-  // 规格
-  const specSize = Math.min(H * 0.1, W * 0.045)
-  ctx.font = `500 ${specSize}px -apple-system, "PingFang SC", sans-serif`
-  ctx.globalAlpha = 0.88
-  ctx.fillText(sku.spec, W / 2, nameY + nameSize * 0.95, W * 0.78)
-  ctx.globalAlpha = 1
+  // 品名下一行规格
+  const specSize = Math.min(nameSize * 0.38, W * 0.032)
+  ctx.font = `500 ${specSize}px ${FONT}`
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'
+  ctx.fillText(sku.spec, W / 2, bandTop * 0.52 + nameSize * 0.78, W * 0.76)
 
-  // 上半部分：左上角小标签
-  const tagH = H * 0.17
-  const tagW = Math.min(W * 0.2, tagH * 1.9)
-  ctx.fillStyle = 'rgba(255,255,255,0.9)'
-  roundRect(ctx, W * 0.06, H * 0.12, tagW, tagH, tagH * 0.18)
-  ctx.fill()
-  ctx.fillStyle = '#2b2b2b'
-  ctx.font = `700 ${tagH * 0.52}px -apple-system, sans-serif`
-  ctx.fillText('NB', W * 0.06 + tagW / 2, H * 0.12 + tagH * 0.52)
+  // 色带里：左边"速冻食品"，右边储存条件
+  const bandText = Math.min(bandH * 0.34, W * 0.03)
+  ctx.font = `600 ${bandText}px ${FONT}`
+  ctx.fillStyle = sku.textColor
+  ctx.textAlign = 'left'
+  ctx.fillText('速冻面米制品', W * 0.035, bandTop + bandH * 0.5)
+  ctx.textAlign = 'right'
+  ctx.fillText('-18℃ 冷藏', W - W * 0.035, bandTop + bandH * 0.5)
 
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
@@ -136,27 +207,110 @@ function faceTexture(sku: Sku) {
   return tex
 }
 
-/** 顶面：牛皮底 + 封箱带 + 角标 */
-function topTexture(sku: Sku) {
-  const S = 256
+/**
+ * 侧面（宽 × 高）：品名缩小 + 一块"配料表"小字 + 条码 + 储存条件。
+ * 正面是名字，侧面是信息，跟真箱一样一面一功能。
+ */
+function sideTexture(sku: Sku) {
+  const W = 512
+  const ratio = sku.boxH / Math.max(1, sku.boxW)
+  const H = Math.max(150, Math.round(W * ratio))
   const cv = document.createElement('canvas')
-  cv.width = S
-  cv.height = S
+  cv.width = W
+  cv.height = H
   const ctx = cv.getContext('2d')!
+  const ink = shade(sku.accentColor, 0.5)
 
-  ctx.fillStyle = sku.boxColor
-  ctx.fillRect(0, 0, S, S)
+  paper(ctx, W, H, sku.boxColor)
 
-  ctx.fillStyle = 'rgba(255,255,255,0.2)'
-  ctx.fillRect(S * 0.44, 0, S * 0.12, S)
-
+  // 底部细色条，跟正面呼应
+  const bandH = Math.round(H * 0.12)
   ctx.fillStyle = sku.accentColor
-  ctx.fillRect(S * 0.05, S * 0.05, S * 0.15, S * 0.085)
+  ctx.fillRect(0, H - bandH, W, bandH)
+
+  // 左上角：小 logo 块
+  const tagH = H * 0.16
+  const tagW = Math.min(W * 0.42, tagH * 2.6)
+  ctx.fillStyle = sku.accentColor
+  roundRect(ctx, W * 0.05, H * 0.07, tagW, tagH, tagH * 0.16)
+  ctx.fill()
   ctx.fillStyle = sku.textColor
-  ctx.font = `700 ${S * 0.05}px -apple-system, sans-serif`
+  ctx.font = `700 ${tagH * 0.55}px ${FONT}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText('NB', S * 0.125, S * 0.093)
+  ctx.fillText('速冻', W * 0.05 + tagW / 2, H * 0.07 + tagH * 0.54)
+
+  // 条码贴着底部色带站，先把它和配料的边界定下来，小字才不会写过头
+  const bcH = Math.max(10, H * 0.16)
+  const bcTop = H - bandH - bcH - H * 0.05
+
+  // 品名（比正面小一号），压在 logo 块下面
+  const nameSize = Math.min(H * 0.14, W * 0.13)
+  const nameY = H * 0.33
+  ctx.fillStyle = ink
+  ctx.font = `700 ${nameSize}px ${FONT}`
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(sku.shortName, W * 0.05, nameY, W * 0.9)
+
+  // 配料表小字：只填品名和条码之间那段，行数按实际高度算
+  const lineSize = Math.max(4, H * 0.028)
+  const linesTop = nameY + nameSize * 0.75
+  const rows = Math.max(2, Math.floor((bcTop - linesTop - H * 0.03) / (lineSize * 1.75)))
+  textLines(ctx, W * 0.05, linesTop, W * 0.9, rows, lineSize)
+
+  // 条码 + 规格
+  barcode(ctx, W * 0.05, bcTop, W * 0.4, bcH)
+  ctx.font = `500 ${Math.max(5, H * 0.032)}px ${FONT}`
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(sku.spec, W * 0.95, bcTop + bcH * 0.4, W * 0.46)
+
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  return tex
+}
+
+/**
+ * 顶面（长 × 宽）：牛皮底 + 中缝（两个摇盖合上的痕迹）+ 品名。
+ * 不用正方形画，免得贴到 1.2 : 0.8 的箱顶被拉长。
+ */
+function topTexture(sku: Sku) {
+  const W = 512
+  const H = Math.max(200, Math.round(W * (sku.boxW / Math.max(1, sku.boxL))))
+  const cv = document.createElement('canvas')
+  cv.width = W
+  cv.height = H
+  const ctx = cv.getContext('2d')!
+  const ink = shade(sku.accentColor, 0.5)
+
+  paper(ctx, W, H, sku.boxColor)
+
+  // 中缝：两块摇盖合上的那条线，两侧各描一道浅影
+  ctx.fillStyle = 'rgba(0,0,0,0.10)'
+  ctx.fillRect(0, H / 2 - 1.5, W, 3)
+  ctx.fillStyle = 'rgba(255,255,255,0.28)'
+  ctx.fillRect(0, H / 2 + 1.5, W, 1.5)
+
+  const nameSize = Math.min(H * 0.22, W * 0.11)
+  ctx.fillStyle = ink
+  ctx.font = `700 ${nameSize}px ${FONT}`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(sku.shortName, W / 2, H * 0.3, W * 0.82)
+  ctx.font = `500 ${nameSize * 0.42}px ${FONT}`
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'
+  ctx.fillText(sku.spec, W / 2, H * 0.3 + nameSize * 0.8, W * 0.7)
+
+  // 下半张：一句"此面朝上"，真箱上都有
+  ctx.fillStyle = sku.accentColor
+  roundRect(ctx, W / 2 - W * 0.1, H * 0.64, W * 0.2, H * 0.13, H * 0.022)
+  ctx.fill()
+  ctx.fillStyle = sku.textColor
+  ctx.font = `600 ${Math.min(H * 0.075, W * 0.042)}px ${FONT}`
+  ctx.fillText('此面朝上', W / 2, H * 0.64 + H * 0.066)
 
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
@@ -292,7 +446,7 @@ export function mountBoxes(
     geo.addGroup(24, 12, 3)
 
     const art = PACK_ART[sku.id]
-    const paper = { roughness: 0.86, metalness: 0 }
+    const papery = { roughness: 0.86, metalness: 0 }
 
     let matSide: THREE.Material
     let matFront: THREE.Material
@@ -300,15 +454,17 @@ export function mountBoxes(
 
     if (art) {
       // 设计稿：正面 / 侧面 / 顶面各一张，比例跟真实箱面一致，箱子就是印出来的样子
-      matFront = new THREE.MeshStandardMaterial({ map: artTexture(art.front), ...paper })
-      matSide = new THREE.MeshStandardMaterial({ map: artTexture(art.side), ...paper })
+      matFront = new THREE.MeshStandardMaterial({ map: artTexture(art.front), ...papery })
+      matSide = new THREE.MeshStandardMaterial({ map: artTexture(art.side), ...papery })
       matTop = new THREE.MeshStandardMaterial({ map: artTexture(art.top), roughness: 0.9 })
     } else {
+      // 自己画：正面是品名，侧面是配料表 + 条码，各贴各的
       const face = faceTexture(sku)
-      matFront = new THREE.MeshStandardMaterial({ map: face, ...paper })
-      matSide = matFront
+      const flank = sideTexture(sku)
+      matFront = new THREE.MeshStandardMaterial({ map: face, ...papery })
+      matSide = new THREE.MeshStandardMaterial({ map: flank, ...papery })
       matTop = new THREE.MeshStandardMaterial({ map: topTexture(sku), roughness: 0.9 })
-      disposables.push(face)
+      disposables.push(face, flank)
     }
 
     // 底面看不到，给个素色省一张贴图
