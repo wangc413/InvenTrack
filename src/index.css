@@ -1817,6 +1817,14 @@ textarea.input {
   margin-left: 8px;
 }
 
+/* 写死的每层个数 */
+.pack-fixed {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding-right: 6px;
+}
+
 /* 装板页的重置键挪到右上，底部留给信息条 */
 .pack-stage .box3d-reset {
   top: 12px;

@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import Box3D from '../components/Box3D'
 import { Icon, Stepper, toast } from '../components/UI'
-import { PALLET_H, fmt, fmtDate, maxLayers, maxPerLayer, summarize } from '../lib/calc'
+import { PALLET_H, fmt, fmtDate, layerPlan, maxLayers, summarize } from '../lib/calc'
 import {
   DEFAULT_LAYERS,
   DEFAULT_PER_LAYER,
@@ -139,13 +139,15 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const [skuId, setSkuId] = useState(editing?.skuId ?? '')
   const [prodDate, setProdDate] = useState(editing?.prodDate ?? '')
   const [layers, setLayers] = useState(editing?.layers ?? DEFAULT_LAYERS)
-  const [perLayer, setPerLayer] = useState(editing?.perLayer ?? DEFAULT_PER_LAYER)
   const [topCount, setTopCount] = useState(editing?.topCount ?? DEFAULT_PER_LAYER)
 
   const sku = skus.find((s) => s.id === skuId) ?? null
   const dates = sku ? stockByDate(db, sku.id) : []
   const picked = dates.find((d) => d.prodDate === prodDate)
 
+  /** 一层怎么摆是写死的：包子类 3 竖 + 4 横（2×2）= 7 个，别的按箱规铺方阵 */
+  const plan = sku ? layerPlan(sku) : null
+  const perLayer = plan?.perLayer ?? DEFAULT_PER_LAYER
   const perBox = sku?.perBox || 1
   const top = Math.min(topCount, perLayer)
   const boxes = sku ? Math.max(0, (layers - 1) * perLayer + top) : 0
@@ -160,8 +162,6 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const avail = Math.max(0, leftBoxes - taken)
   const over = boxes - avail
 
-  /** 每层最多几个是硬的：托盘就那么大，塞不下就是悬空 */
-  const perCap = sku ? Math.max(maxPerLayer(sku), perLayer) : DEFAULT_PER_LAYER
   /** 层数不设死上限，超了只提醒 —— 现场真有人码到 2 米 */
   const softLayers = sku ? maxLayers(sku) : DEFAULT_LAYERS
   const tooTall = layers > softLayers
@@ -172,9 +172,8 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const pick = (s: Sku) => {
     setSkuId(s.id)
     setProdDate(stockByDate(db, s.id)[0]?.prodDate ?? '')
-    // 起点按这个箱规在标准托盘上真能码多少算，不是拍一个「42 箱」
-    const pl = maxPerLayer(s)
-    setPerLayer(pl)
+    // 起点按这个品的固定码法算：满层几个、能码几层
+    const pl = layerPlan(s).perLayer
     setLayers(maxLayers(s))
     setTopCount(pl)
   }
@@ -287,28 +286,21 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
             <>
               <div className="card card-pad">
                 <div className="pack-row">
-                  <span>层数</span>
-                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
-                </div>
-                <div className="pack-row">
                   <span>
                     每层几个
-                    <em className="pack-cap">最多 {maxPerLayer(sku)}</em>
+                    <em className="pack-cap">{plan?.note}</em>
                   </span>
-                  <Stepper
-                    value={perLayer}
-                    min={1}
-                    max={perCap}
-                    onChange={(v) => {
-                      setPerLayer(v)
-                      setTopCount((t) => Math.min(t, v))
-                    }}
-                  />
+                  <b className="pack-fixed">{perLayer}</b>
+                </div>
+                <div className="pack-row">
+                  <span>码几层</span>
+                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
                 </div>
                 <div className="pack-row">
                   <span>最上层几个</span>
                   <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
                 </div>
+                <div className="pack-note">托盘 1.2 × 1.0 m，一层怎么摆是固定的。</div>
               </div>
 
               {over > 0 && (

@@ -10,7 +10,7 @@ import {
   type Sku,
 } from '../lib/store'
 import SkuForm from '../components/SkuForm'
-import { boxText } from '../lib/calc'
+import { boxText, layerPlan } from '../lib/calc'
 import { Icon, Sheet, toast } from '../components/UI'
 
 /* ---------- 客户 ---------- */
@@ -144,6 +144,9 @@ export default function Catalog() {
                         <div className="meta">{s.spec || '无规格'}</div>
                         <div className="meta">
                           {s.boxL}×{s.boxW}×{s.boxH} mm · {s.boxWeight} kg/箱
+                        </div>
+                        <div className="meta">
+                          一层 {layerPlan(s).perLayer} 个 · {layerPlan(s).note}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right', flex: '0 0 auto' }}>

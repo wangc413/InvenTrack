@@ -47,37 +47,92 @@ export const PALLET_H = 145
 /** 连托盘一起的码垛上限，1.8 米，再高叉车看不稳也进不了车厢 */
 export const MAX_STACK_H = 1800
 
+/* ---------- 一层的码法 ---------- */
+
 /**
- * 这个箱规一层最多能码几个：按托盘实际尺寸排，允许箱子转 90°。
- * 以前是「每层固定 6 个」，烧麦那种 465×410 的箱子其实只能码 4 个。
+ * 一个箱位。单位毫米，坐标相对托盘中心：
+ * x 顺着托盘长边（1.2 m），z 顺着托盘宽边（1 m）。
+ * turn = 这箱转 90°（长边改为顺着 1 m 那边）。
  */
-export function maxPerLayer(sku: Sku) {
+export type Slot = { x: number; z: number; turn: boolean }
+
+export type LayerPlan = {
+  /** 满层几个 */
+  perLayer: number
+  slots: Slot[]
+  /** 给界面看的一句话，如「3 竖 + 4 横（2×2）」 */
+  note: string
+  /** true = 现场固定的码法，不是按箱规算出来的 */
+  fixed: boolean
+}
+
+/** 按箱规铺成整齐的方阵，能转 90° 就转，取放得多的那种 */
+function gridPlan(sku: Sku): LayerPlan {
   const l = Math.max(1, sku.boxL)
   const w = Math.max(1, sku.boxW)
-  const plain = Math.floor(PALLET_L / l) * Math.floor(PALLET_W / w)
-  const turned = Math.floor(PALLET_L / w) * Math.floor(PALLET_W / l)
-  return Math.max(1, plain, turned)
+  const plain = { cols: Math.floor(PALLET_L / l), rows: Math.floor(PALLET_W / w), turn: false }
+  const turned = { cols: Math.floor(PALLET_L / w), rows: Math.floor(PALLET_W / l), turn: true }
+  const best = turned.cols * turned.rows > plain.cols * plain.rows ? turned : plain
+  const cols = Math.max(1, best.cols)
+  const rows = Math.max(1, best.rows)
+  const dx = best.turn ? w : l
+  const dz = best.turn ? l : w
+  const slots: Slot[] = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      slots.push({ x: (c - (cols - 1) / 2) * dx, z: (r - (rows - 1) / 2) * dz, turn: best.turn })
+    }
+  }
+  return { perLayer: slots.length, slots, note: `${cols} × ${rows} 方阵`, fixed: false }
+}
+
+/**
+ * 盒马包子的固定码法：一层 7 个 = 3 竖 + 4 横（4 个横的挤成 2×2）。
+ *
+ *   竖：箱子长边顺着 1.2 m 那边，3 个沿着 1 m 那边排开
+ *   横：转 90°，4 个在剩下的地方铺成 2×2
+ *
+ * 以肉包 500×335 算：1.2 m 上 500 + 2×335 = 1170，还剩 30 mm 下手；
+ * 1 m 上 3×335 = 1005（挤一挤）对 2×500 = 1000，两边都刚好齐板。
+ */
+function baoPlan(sku: Sku): LayerPlan {
+  const l = Math.max(1, sku.boxL)
+  const w = Math.max(1, sku.boxW)
+  const spanX = l + 2 * w // 竖的一排 + 横的 2 列
+  const spanZ = Math.max(3 * w, 2 * l)
+  const x0 = -spanX / 2
+  const slots: Slot[] = []
+  // 3 竖：贴左边，沿 z 排开
+  for (let i = 0; i < 3; i++) {
+    slots.push({ x: x0 + l / 2, z: -spanZ / 2 + w / 2 + i * w, turn: false })
+  }
+  // 4 横：2 列 × 2 排，占右边
+  for (let r = 0; r < 2; r++) {
+    for (let c = 0; c < 2; c++) {
+      slots.push({ x: x0 + l + w / 2 + c * w, z: -spanZ / 2 + l / 2 + r * l, turn: true })
+    }
+  }
+  return { perLayer: slots.length, slots, note: '3 竖 + 4 横（2×2）', fixed: true }
+}
+
+/** 包子类走现场固定码法，其余按箱规铺方阵 */
+export function layerPlan(sku: Sku): LayerPlan {
+  return /菜包|肉包/.test(`${sku.name}${sku.shortName}`) ? baoPlan(sku) : gridPlan(sku)
+}
+
+/** 这个品满层几个 */
+export function perLayerOf(sku: Sku) {
+  return layerPlan(sku).perLayer
+}
+
+/** 满层几个（旧名，等价于 perLayerOf） */
+export function maxPerLayer(sku: Sku) {
+  return perLayerOf(sku)
 }
 
 /** 这个箱规最多能码几层：按 1.8 米总高倒推 */
 export function maxLayers(sku: Sku) {
   return Math.max(1, Math.floor((MAX_STACK_H - PALLET_H) / Math.max(50, sku.boxH)))
-}
-
-/** 一块板上按“每层几个”铺开，占多大地方（毫米） */
-export function stackLayout(sku: Sku, perLayer: number) {
-  const n = Math.max(1, Math.min(perLayer, 40))
-  let best = { cols: 1, rows: n, L: sku.boxL, W: n * sku.boxW, score: Number.POSITIVE_INFINITY }
-  for (let cols = 1; cols <= n; cols++) {
-    const rows = Math.ceil(n / cols)
-    const L = cols * sku.boxL
-    const W = rows * sku.boxW
-    const waste = cols * rows - n
-    // 目标长宽比接近标准托盘 1.2 : 1，同时别留太多空格子
-    const score = Math.abs(Math.log(L / W / 1.2)) + waste * 0.18
-    if (score < best.score) best = { cols, rows, L, W, score }
-  }
-  return best
 }
 
 export type PalletStat = {

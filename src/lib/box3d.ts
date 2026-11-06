@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { PALLET_L, PALLET_W, stackLayout } from './calc'
+import { PALLET_L, PALLET_W, layerPlan } from './calc'
 import type { Sku } from './store'
 
 /** 全部按毫米建模，最后统一缩成米 */
@@ -8,7 +8,6 @@ const MM = 0.001
 
 /** 托盘面高度（含顶板），箱子从这里往上堆 */
 const PALLET_H = 145
-const PALLET_MARGIN = 40
 /** 箱子比格子略小一点，堆起来才看得出是一箱一箱 */
 const BOX_SHRINK = 0.985
 
@@ -269,13 +268,29 @@ export function mountBoxes(
   /** 相机相对目标的朝向，跟着用户旋转走，改层数时不会把视角拽回去 */
   const camDir = VIEW_DIR.clone()
 
+  const fitUp = new THREE.Vector3(0, 1, 0)
+
+  /**
+   * 取景：按包围盒 8 个角在当前视角下的投影算需要多远，
+   * 比「高度 ÷ tan(fov/2)」准 —— 斜着看时堆高和进深会叠在一起，那样算会切到板边。
+   */
   function fit() {
-    const vFov = (camera.fov * Math.PI) / 180
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect)
-    // 绕竖轴转的时候，横向占用最多也就是长边；纵向就是堆高
-    const halfH = Math.max(size.x, size.z) / 2
-    const halfV = size.y / 2
-    const dist = Math.max(halfV / Math.tan(vFov / 2), halfH / Math.tan(hFov / 2)) * 1.16
+    const tanV = Math.tan((camera.fov * Math.PI) / 360)
+    const tanH = tanV * camera.aspect
+    const right = new THREE.Vector3().crossVectors(fitUp, camDir).normalize()
+    const up = new THREE.Vector3().crossVectors(camDir, right).normalize()
+    const h = size.clone().multiplyScalar(0.5)
+    let dist = 0.3
+    for (let i = 0; i < 8; i++) {
+      const p = new THREE.Vector3(
+        (i & 1 ? h.x : -h.x),
+        (i & 2 ? h.y : -h.y),
+        (i & 4 ? h.z : -h.z),
+      )
+      const depth = p.dot(camDir)
+      dist = Math.max(dist, Math.abs(p.dot(right)) / tanH + depth, Math.abs(p.dot(up)) / tanV + depth)
+    }
+    dist *= 1.1
     camera.position.copy(center).addScaledVector(camDir, Math.max(0.3, dist))
     controls.target.copy(center)
     controls.update()
@@ -295,71 +310,50 @@ export function mountBoxes(
     if (list.length === 0) {
       if (opts.emptyPallet) {
         const g = new THREE.Group()
-        g.add(
-          makePalletMesh(
-            (PALLET_L + PALLET_MARGIN * 2) * MM,
-            (PALLET_W + PALLET_MARGIN * 2) * MM,
-            wood,
-            woodDark,
-            transient,
-          ),
-        )
+        g.add(makePalletMesh(PALLET_L * MM, PALLET_W * MM, wood, woodDark, transient))
         root.add(g)
       }
       const bbox = new THREE.Box3().setFromObject(root)
       if (!bbox.isEmpty()) {
         bbox.getCenter(center)
         bbox.getSize(size)
+        frameBounds()
       }
       return
     }
 
-    // 先把每块板的占地算出来，才能横向排开
-    const plans = list.map((p) => {
-      const { cols, rows, L, W } = stackLayout(p.sku, p.perLayer)
-      return {
-        ...p,
-        cols,
-        rows,
-        palletL: (L + PALLET_MARGIN * 2) * MM,
-        palletW: (W + PALLET_MARGIN * 2) * MM,
-      }
-    })
-
-    const gap = 0.38
-    const totalW = plans.reduce((s, p) => s + p.palletL, 0) + gap * Math.max(0, plans.length - 1)
+    // 托盘就是 1.2 m × 1 m，一块板占一格，横向排开
+    const palletL = PALLET_L * MM
+    const palletW = PALLET_W * MM
+    const gap = 0.34
+    const totalW = list.length * palletL + gap * Math.max(0, list.length - 1)
     let cursor = -totalW / 2
 
-    for (const p of plans) {
+    for (const p of list) {
       const group = new THREE.Group()
-      group.position.x = cursor + p.palletL / 2
-      cursor += p.palletL + gap
+      group.position.x = cursor + palletL / 2
+      cursor += palletL + gap
       root.add(group)
 
-      group.add(makePalletMesh(p.palletL, p.palletW, wood, woodDark, transient))
+      group.add(makePalletMesh(palletL, palletW, wood, woodDark, transient))
 
       const { geo, matSide, matTop } = assetFor(p.sku)
-      const stepL = p.sku.boxL * MM
-      const stepW = p.sku.boxW * MM
+      // 位置完全照这个品的固定码法来：箱子怎么转、摆在哪，都是写好的
+      const plan = layerPlan(p.sku)
+      const slots = plan.slots
+      const full = Math.min(Math.max(1, p.perLayer), slots.length)
       const stepH = p.sku.boxH * MM
-      const halfL = (p.cols * p.sku.boxL * MM) / 2
-      const halfW = (p.rows * p.sku.boxW * MM) / 2
       const baseY = PALLET_H * MM
-      const top = Math.min(p.topCount, p.perLayer)
+      const top = Math.min(p.topCount, full)
 
       for (let layer = 0; layer < p.layers; layer++) {
-        const isTop = layer === p.layers - 1
-        const count = isTop ? top : p.perLayer
+        const count = layer === p.layers - 1 ? top : full
         for (let i = 0; i < count; i++) {
-          const col = i % p.cols
-          const row = Math.floor(i / p.cols)
-          // 箱子长边一律顺着托盘长度方向摆
+          const slot = slots[i]
           const box = new THREE.Mesh(geo, [matTop, matSide])
-          box.position.set(
-            col * stepL + stepL / 2 - halfL,
-            baseY + layer * stepH + stepH / 2,
-            row * stepW + stepW / 2 - halfW,
-          )
+          box.position.set(slot.x * MM, baseY + layer * stepH + stepH / 2, slot.z * MM)
+          // 横的那几个转 90°，长边改顺着 1 m 那边
+          if (slot.turn) box.rotation.y = Math.PI / 2
           box.castShadow = true
           box.receiveShadow = true
           group.add(box)
@@ -372,7 +366,15 @@ export function mountBoxes(
     if (!bbox.isEmpty()) {
       bbox.getCenter(center)
       bbox.getSize(size)
+      frameBounds()
     }
+  }
+
+  /** 取景尺寸至少留一块托盘，不然只码一层时相机贴得太近，板边都被切掉 */
+  function frameBounds() {
+    size.x = Math.max(size.x, PALLET_L * MM)
+    size.z = Math.max(size.z, PALLET_W * MM)
+    size.y = Math.max(size.y, 0.42)
   }
 
   function resize() {
