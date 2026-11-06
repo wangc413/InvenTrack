@@ -129,7 +129,7 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
 /* ---------- 装板工作台 ---------- */
 
 /**
- * 一块板一屏：上面 3D 实时反映码垛，下面调层数 / 每层个数 / 顶层个数。
+ * 一块板一屏：3D 占满，品 / 日期收成两个下拉，层数和顶层直接在 3D 上按 + / −。
  * 点「装上」把这块定下来，清空成下一块空板，接着装。
  */
 function PackingBoard({ order, editing, onBack }: { order: Order; editing: Pallet | null; onBack: () => void }) {
@@ -140,16 +140,18 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const [prodDate, setProdDate] = useState(editing?.prodDate ?? '')
   const [layers, setLayers] = useState(editing?.layers ?? DEFAULT_LAYERS)
   const [topCount, setTopCount] = useState(editing?.topCount ?? DEFAULT_PER_LAYER)
+  /** 当前展开的是哪个下拉：品 / 生产日期 */
+  const [menu, setMenu] = useState<'sku' | 'date' | null>(null)
 
   const sku = skus.find((s) => s.id === skuId) ?? null
   const dates = sku ? stockByDate(db, sku.id) : []
   const picked = dates.find((d) => d.prodDate === prodDate)
 
-  /** 一层怎么摆是写死的：包子类 3 竖 + 4 横（2×2）= 7 个，别的按箱规铺方阵 */
+  /** 一层怎么摆是写死的：包子 3 竖 + 4 横 = 7 个，烧麦 3 竖 + 2 横 = 5 个 */
   const plan = sku ? layerPlan(sku) : null
-  const perLayer = plan?.perLayer ?? DEFAULT_PER_LAYER
+  const perLayer = plan?.perLayer ?? 0
   const perBox = sku?.perBox || 1
-  const top = Math.min(topCount, perLayer)
+  const top = perLayer > 0 ? Math.min(Math.max(1, topCount), perLayer) : 0
   const boxes = sku ? Math.max(0, (layers - 1) * perLayer + top) : 0
   const qty = boxes * perBox
 
@@ -169,13 +171,18 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const palletNo = editing?.no ?? `P${order.pallets.length + 1}`
   const nextNo = `P${order.pallets.length + 2}`
 
-  const pick = (s: Sku) => {
+  const pickSku = (s: Sku) => {
     setSkuId(s.id)
     setProdDate(stockByDate(db, s.id)[0]?.prodDate ?? '')
     // 起点按这个品的固定码法算：满层几个、能码几层
-    const pl = layerPlan(s).perLayer
     setLayers(maxLayers(s))
-    setTopCount(pl)
+    setTopCount(layerPlan(s).perLayer)
+    setMenu(null)
+  }
+
+  const pickDate = (d: string) => {
+    setProdDate(d)
+    setMenu(null)
   }
 
   const putOn = () => {
@@ -200,6 +207,12 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
 
   const spec = sku ? [{ no: palletNo, sku, layers, perLayer, topCount: top }] : []
   const stackH = sku ? (layers * sku.boxH + PALLET_H) / 1000 : 0
+  const warn =
+    over > 0
+      ? `库存不足：这天只能装 ${avail} 箱`
+      : tooTall
+        ? `码高 ${fmt(stackH, 2)} m，超过 1.8 m`
+        : ''
 
   return (
     <>
@@ -217,102 +230,100 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
           </p>
         </header>
 
-        <div className="pack-stage">
-          <Box3D pallets={spec} emptyPallet />
-          <div className="pack-hud">
-            <div className="hud-main">
-              {sku ? (
-                <>
-                  <span>{nickOf(sku)}</span>
-                  <b>{boxes} 箱</b>
-                  <em>{qty} 件</em>
-                </>
-              ) : (
-                <span>还没选品</span>
-              )}
-            </div>
-            {sku && (
-              <div className={`hud-sub ${tooTall ? 'warn' : ''}`}>
-                {tooTall
-                  ? `码高 ${fmt(stackH, 2)} m，超过 1.8 m 上限`
-                  : prodDate
-                    ? `这天还能装 ${avail} 箱`
-                    : '这个品还没有库存'}
-              </div>
-            )}
-          </div>
-        </div>
+        <div className="pack-pick">
+          <button
+            className={`picker ${menu === 'sku' ? 'on' : ''}`}
+            onClick={() => setMenu(menu === 'sku' ? null : 'sku')}
+          >
+            <em>品</em>
+            <b>{sku ? nickOf(sku) : '选品'}</b>
+            <i className="caret" />
+          </button>
+          <button
+            className={`picker ${menu === 'date' ? 'on' : ''}`}
+            disabled={!sku}
+            onClick={() => setMenu(menu === 'date' ? null : 'date')}
+          >
+            <em>日期</em>
+            <b>{prodDate ? fmtDate(prodDate) : '—'}</b>
+            <i className="caret" />
+          </button>
 
-        <div className="pack-panel">
-          <div className="card card-pad">
-            <label className="field-label">装什么</label>
-            <div className="chips">
-              {skus.map((s) => (
-                <button key={s.id} className={`chip ${skuId === s.id ? 'on' : ''}`} onClick={() => pick(s)}>
-                  <span className="chip-dot" style={{ background: s.accentColor }} />
-                  {nickOf(s)}
-                </button>
-              ))}
-            </div>
-            {skus.length === 0 && <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>}
-
-            {sku && dates.length > 0 && (
-              <>
-                <label className="field-label" style={{ marginTop: 14 }}>
-                  生产日期
-                </label>
-                <div className="chips">
-                  {dates.map((d) => (
-                    <button
-                      key={d.prodDate}
-                      className={`chip ${prodDate === d.prodDate ? 'on' : ''}`}
-                      onClick={() => setProdDate(d.prodDate)}
-                    >
-                      {fmtDate(d.prodDate)}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {sku && dates.length === 0 && (
-              <div className="hint" style={{ margin: '12px 2px 0' }}>
-                这个品还没有库存，先去「库存」入库再发
-              </div>
-            )}
-          </div>
-
-          {sku && (
+          {menu && (
             <>
-              <div className="card card-pad">
-                <div className="pack-row">
-                  <span>
-                    每层几个
-                    <em className="pack-cap">{plan?.note}</em>
-                  </span>
-                  <b className="pack-fixed">{perLayer}</b>
-                </div>
-                <div className="pack-row">
-                  <span>码几层</span>
-                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
-                </div>
-                <div className="pack-row">
-                  <span>最上层几个</span>
-                  <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
-                </div>
-                <div className="pack-note">托盘 1.2 × 1.0 m，一层怎么摆是固定的。</div>
+              <div className="picker-mask" onClick={() => setMenu(null)} />
+              <div className="picker-pop">
+                <div className="picker-pop-title">{menu === 'sku' ? '这趟发哪几个品' : '用哪个生产日期'}</div>
+                {menu === 'sku' &&
+                  (skus.length > 0 ? (
+                    <div className="chips">
+                      {skus.map((s) => (
+                        <button
+                          key={s.id}
+                          className={`chip ${skuId === s.id ? 'on' : ''}`}
+                          onClick={() => pickSku(s)}
+                        >
+                          <span className="chip-dot" style={{ background: s.accentColor }} />
+                          {nickOf(s)}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>
+                  ))}
+                {menu === 'date' &&
+                  (dates.length > 0 ? (
+                    <div className="chips">
+                      {dates.map((d) => (
+                        <button
+                          key={d.prodDate}
+                          className={`chip ${prodDate === d.prodDate ? 'on' : ''}`}
+                          onClick={() => pickDate(d.prodDate)}
+                        >
+                          {fmtDate(d.prodDate)}
+                          <em className="chip-sub">{Math.floor(d.left / perBox)} 箱</em>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="hint">这个品还没有库存，先去「库存」入库再发</div>
+                  ))}
               </div>
-
-              {over > 0 && (
-                <div className="alert" style={{ margin: '10px 0 0' }}>
-                  库存不足：{fmtDate(prodDate)} 还能装 {avail} 箱
-                  {taken > 0 ? `（本车已占 ${taken} 箱）` : ''}，请减少 {over} 箱
-                </div>
-              )}
             </>
           )}
+        </div>
 
-          <div style={{ height: 8 }} />
+        <div className={`pack-stage ${sku ? 'with-ops' : ''}`}>
+          <Box3D pallets={spec} emptyPallet />
+          {!sku && <div className="pack-empty">选个品，箱子就码上来了</div>}
+
+          {sku && (
+            <div className="pack-ops">
+              <div className="op-head">
+                <div className="who">
+                  <b>{nickOf(sku)}</b>
+                  <span>{boxes} 箱</span>
+                  <em>{qty} 件</em>
+                </div>
+                <div className={`sub ${warn ? 'warn' : ''}`}>
+                  {warn || (prodDate ? `这天还能装 ${avail} 箱` : '还没选生产日期')}
+                </div>
+              </div>
+              <div className="op">
+                <span>码几层</span>
+                <Stepper value={layers} min={1} max={24} onChange={setLayers} />
+              </div>
+              <div className="op">
+                <span>顶层几个</span>
+                <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
+              </div>
+              <div className="op static">
+                <span>每层</span>
+                <b>{perLayer}</b>
+              </div>
+              <div className="op-note">{plan?.note} · 隔层调头</div>
+            </div>
+          )}
         </div>
       </div>
 

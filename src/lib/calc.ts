@@ -115,9 +115,45 @@ function baoPlan(sku: Sku): LayerPlan {
   return { perLayer: slots.length, slots, note: '3 竖 + 4 横（2×2）', fixed: true }
 }
 
-/** 包子类走现场固定码法，其余按箱规铺方阵 */
+/**
+ * 烧麦的固定码法：一层 5 个 = 后排 3 竖 + 前排 2 横。
+ *
+ *   竖：410 顺着 1.2 m 那边，3 个并排（3×410 = 1230，两边各挤 15 mm）
+ *   横：465 顺着 1.2 m 那边，2 个摆前面，中间自然留一道缝
+ *
+ * 进深 465 + 410 = 875，1 m 这边还宽裕，叉车插得进。
+ */
+function shaomaiPlan(sku: Sku): LayerPlan {
+  const l = Math.max(1, sku.boxL) // 465
+  const w = Math.max(1, sku.boxW) // 410
+  const spanZ = l + w
+  const slots: Slot[] = []
+  // 后排 3 竖：长边（l）顺进深方向，w 顺着 1.2 m 并排
+  for (let i = 0; i < 3; i++) {
+    slots.push({ x: (i - 1) * w, z: -spanZ / 2 + l / 2, turn: true })
+  }
+  // 前排 2 横：l 顺着 1.2 m
+  for (let j = 0; j < 2; j++) {
+    slots.push({ x: (j - 0.5) * l, z: -spanZ / 2 + l + w / 2, turn: false })
+  }
+  return { perLayer: slots.length, slots, note: '3 竖 + 2 横', fixed: true }
+}
+
+/** 包子、烧麦走现场固定码法，其余按箱规铺方阵 */
 export function layerPlan(sku: Sku): LayerPlan {
-  return /菜包|肉包/.test(`${sku.name}${sku.shortName}`) ? baoPlan(sku) : gridPlan(sku)
+  const key = `${sku.name}${sku.shortName}`
+  if (/菜包|肉包/.test(key)) return baoPlan(sku)
+  if (/烧麦/.test(key)) return shaomaiPlan(sku)
+  return gridPlan(sku)
+}
+
+/**
+ * 这一层实际摆在哪：单数层整体转 180°。
+ * 现场是这么码的 —— 上下层的缝错开压住，垛才不歪；所以「每层几个」不变，方向隔层调头。
+ */
+export function layerSlots(plan: LayerPlan, layer: number): Slot[] {
+  if (layer % 2 === 0) return plan.slots
+  return plan.slots.map((s) => ({ x: -s.x, z: -s.z, turn: s.turn }))
 }
 
 /** 这个品满层几个 */

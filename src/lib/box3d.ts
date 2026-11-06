@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { PALLET_L, PALLET_W, layerPlan } from './calc'
+import { PALLET_L, PALLET_W, layerPlan, layerSlots } from './calc'
 import type { Sku } from './store'
 
 /** 全部按毫米建模，最后统一缩成米 */
@@ -290,7 +290,7 @@ export function mountBoxes(
       const depth = p.dot(camDir)
       dist = Math.max(dist, Math.abs(p.dot(right)) / tanH + depth, Math.abs(p.dot(up)) / tanV + depth)
     }
-    dist *= 1.1
+    dist *= 1.16
     camera.position.copy(center).addScaledVector(camDir, Math.max(0.3, dist))
     controls.target.copy(center)
     controls.update()
@@ -340,13 +340,14 @@ export function mountBoxes(
       const { geo, matSide, matTop } = assetFor(p.sku)
       // 位置完全照这个品的固定码法来：箱子怎么转、摆在哪，都是写好的
       const plan = layerPlan(p.sku)
-      const slots = plan.slots
-      const full = Math.min(Math.max(1, p.perLayer), slots.length)
+      const full = Math.min(Math.max(1, p.perLayer), plan.slots.length)
       const stepH = p.sku.boxH * MM
       const baseY = PALLET_H * MM
       const top = Math.min(p.topCount, full)
 
       for (let layer = 0; layer < p.layers; layer++) {
+        // 单数层整体调头 180°，缝错开压住
+        const slots = layerSlots(plan, layer)
         const count = layer === p.layers - 1 ? top : full
         for (let i = 0; i < count; i++) {
           const slot = slots[i]
