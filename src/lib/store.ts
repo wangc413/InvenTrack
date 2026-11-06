@@ -778,6 +778,50 @@ export function addPallet(orderId: string, input: Omit<Pallet, 'id' | 'no' | 'cr
   return id
 }
 
+/**
+ * 按箱数加板：先按满板（默认 7 层 × 6 个 = 42 箱）整板装，余数再按层数 + 顶层码。
+ * 返回加入的板数。
+ */
+export function addPalletsByBoxes(
+  orderId: string,
+  input: { skuId: string; prodDate: string; boxes: number; perLayer?: number; maxLayers?: number },
+) {
+  const perLayer = input.perLayer ?? DEFAULT_PER_LAYER
+  const maxLayers = input.maxLayers ?? DEFAULT_LAYERS
+  const perPallet = perLayer * maxLayers
+
+  const shapes: { layers: number; perLayer: number; topCount: number }[] = []
+  const full = Math.floor(input.boxes / perPallet)
+  for (let i = 0; i < full; i++) shapes.push({ layers: maxLayers, perLayer, topCount: perLayer })
+
+  const rest = input.boxes - full * perPallet
+  if (rest > 0) {
+    const layers = Math.max(1, Math.ceil(rest / perLayer))
+    shapes.push({ layers, perLayer, topCount: rest - (layers - 1) * perLayer })
+  }
+  if (shapes.length === 0) return 0
+
+  commit({
+    ...state,
+    orders: state.orders.map((o) => {
+      if (o.id !== orderId) return o
+      const now = Date.now()
+      const added: Pallet[] = shapes.map((s, i) => ({
+        id: uid(),
+        no: `P${o.pallets.length + i + 1}`,
+        skuId: input.skuId,
+        prodDate: input.prodDate,
+        layers: s.layers,
+        perLayer: s.perLayer,
+        topCount: s.topCount,
+        createdAt: now,
+      }))
+      return { ...o, pallets: [...o.pallets, ...added] }
+    }),
+  })
+  return shapes.length
+}
+
 export function updatePallet(orderId: string, palletId: string, patch: Partial<Omit<Pallet, 'id'>>) {
   commit({
     ...state,

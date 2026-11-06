@@ -6,6 +6,7 @@ import {
   DEFAULT_LAYERS,
   DEFAULT_PER_LAYER,
   addPallet,
+  addPalletsByBoxes,
   createOrder,
   customerById,
   palletBoxes,
@@ -37,55 +38,286 @@ export function specOfOrder(db: ReturnType<typeof useDB>, order: Order): PalletS
 
 /* ---------- 新建车次 ---------- */
 
-function NewOrderSheet({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  onClose: () => void
-  onCreated: (id: string) => void
-}) {
+/** 一块满板装多少箱 */
+const FULL_PALLET = DEFAULT_LAYERS * DEFAULT_PER_LAYER
+
+type DraftItem = { key: string; skuId: string; prodDate: string; boxes: number }
+
+function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
   const db = useDB()
+
+  /** 最近用过的收货地，点一下直接填 */
+  const recent = useMemo(() => {
+    const out: string[] = []
+    for (const o of db.orders) {
+      const d = o.destination.trim()
+      if (d && !out.includes(d)) out.push(d)
+    }
+    return out.slice(0, 4)
+  }, [db.orders])
+
   const [destination, setDestination] = useState('')
-  const [customerId, setCustomerId] = useState(db.customers[0]?.id ?? '')
+  const [customerId, setCustomerId] = useState('')
+  const [skuId, setSkuId] = useState('')
+  const [prodDate, setProdDate] = useState('')
+  const [boxes, setBoxes] = useState(FULL_PALLET)
+  const [items, setItems] = useState<DraftItem[]>([])
+
+  const skus = customerId ? skusOfCustomer(db, customerId) : []
+  const sku = skus.find((s) => s.id === skuId) ?? null
+  const dates = sku ? stockByDate(db, sku.id) : []
+  const picked = dates.find((d) => d.prodDate === prodDate)
+
+  const boxesOf = (qty: number, perBox: number) => Math.floor(qty / (perBox || 1))
+
+  const totalBoxes = items.reduce((n, i) => n + i.boxes, 0)
+  const totalQty = items.reduce((n, i) => {
+    const k = db.skus.find((s) => s.id === i.skuId)
+    return n + i.boxes * (k?.perBox ?? 0)
+  }, 0)
+
+  const pickCustomer = (id: string) => {
+    setCustomerId(id)
+    setSkuId('')
+    setProdDate('')
+  }
+
+  const pickSku = (id: string) => {
+    setSkuId(id)
+    const list = stockByDate(db, id)
+    const first = list[0]?.prodDate ?? ''
+    setProdDate(first)
+    // 默认箱数取「满板」和「这个日期还剩多少箱」里小的那个，免得一上来就超发
+    const k = db.skus.find((s) => s.id === id)
+    const cap = first ? Math.floor((list[0]?.left ?? 0) / (k?.perBox || 1)) : 0
+    setBoxes(cap > 0 ? Math.min(FULL_PALLET, cap) : FULL_PALLET)
+  }
+
+  const addItem = () => {
+    if (!sku) return toast('先选一个品')
+    if (!prodDate) return toast('这个品还没有库存')
+    if (boxes <= 0) return toast('箱数要大于 0')
+    setItems((p) => [...p, { key: `${Date.now()}-${Math.random()}`, skuId: sku.id, prodDate, boxes }])
+    // 收回到「选品」这一步，免得旧箱数对着新日期一直报超发
+    setSkuId('')
+    setProdDate('')
+    setBoxes(FULL_PALLET)
+    toast('已加入订单')
+  }
+
+  const create = () => {
+    if (!destination.trim()) return toast('先填收货地')
+    if (!customerId) return toast('先选收货方')
+    const id = createOrder({ destination: destination.trim(), customerId })
+    for (const it of items) {
+      addPalletsByBoxes(id, { skuId: it.skuId, prodDate: it.prodDate, boxes: it.boxes })
+    }
+    onCreated(id)
+  }
+
+  const leftBoxes = picked && sku ? boxesOf(picked.left, sku.perBox) : 0
+  const over = picked && sku ? boxes - leftBoxes : 0
 
   return (
-    <Sheet open={open} title="新建车次" onClose={onClose}>
-      <label className="field-label">收货地</label>
-      <input
-        className="input"
-        value={destination}
-        onChange={(e) => setDestination(e.target.value)}
-        placeholder="门店名或详细地址"
-        autoFocus
-      />
-
-      <label className="field-label" style={{ marginTop: 18 }}>
-        收货方
-      </label>
-      <div className="chips">
-        {db.customers.map((c) => (
-          <button key={c.id} className={`chip ${customerId === c.id ? 'on' : ''}`} onClick={() => setCustomerId(c.id)}>
-            {c.name}
+    <>
+      <div className="page with-dock">
+        <header className="topbar back-mode">
+          <button className="icon-btn" onClick={onCancel} aria-label="返回">
+            <Icon name="back" size={22} />
           </button>
-        ))}
+          <h1>新建车次</h1>
+          <p className="sub">收货地 → 收货方 → 装什么 → 填箱数</p>
+        </header>
+
+        <div className="card card-pad">
+          <label className="field-label">1 · 收货地</label>
+          <input
+            className="input"
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder="门店名或详细地址"
+            autoFocus
+          />
+          {recent.length > 0 && (
+            <div className="chips" style={{ marginTop: 10 }}>
+              {recent.map((d) => (
+                <button
+                  key={d}
+                  className={`chip ${destination === d ? 'on' : ''}`}
+                  onClick={() => setDestination(d)}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="card card-pad" style={{ marginTop: 8 }}>
+          <label className="field-label">2 · 收货方</label>
+          <div className="chips">
+            {db.customers.map((c) => (
+              <button
+                key={c.id}
+                className={`chip ${customerId === c.id ? 'on' : ''}`}
+                onClick={() => pickCustomer(c.id)}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {customerId && (
+          <div className="card card-pad" style={{ marginTop: 8 }}>
+            <label className="field-label">3 · 装什么</label>
+            <div className="pick-list">
+              {skus.map((s) => {
+                const left = stockByDate(db, s.id).reduce((n, d) => n + d.left, 0)
+                return (
+                  <button
+                    key={s.id}
+                    className={`pick-row ${skuId === s.id ? 'on' : ''}`}
+                    onClick={() => pickSku(s.id)}
+                  >
+                    <span className="pick-swatch" style={{ background: s.accentColor }} />
+                    <span className="pick-main">
+                      <span className="pick-name">{s.shortName}</span>
+                      <span className="pick-spec">{s.spec}</span>
+                    </span>
+                    <span className={`pick-stock ${left > 0 ? '' : 'none'}`}>
+                      {left > 0 ? `${boxesOf(left, s.perBox)} 箱` : '无库存'}
+                    </span>
+                  </button>
+                )
+              })}
+              {skus.length === 0 && <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>}
+            </div>
+
+            {sku && dates.length > 0 && (
+              <>
+                <label className="field-label" style={{ marginTop: 16 }}>
+                  生产日期
+                </label>
+                <div className="chips">
+                  {dates.map((d) => (
+                    <button
+                      key={d.prodDate}
+                      className={`chip ${prodDate === d.prodDate ? 'on' : ''}`}
+                      onClick={() => setProdDate(d.prodDate)}
+                    >
+                      {fmtDate(d.prodDate)}
+                      <em>{boxesOf(d.left, sku.perBox)}</em>
+                    </button>
+                  ))}
+                </div>
+
+                <label className="field-label" style={{ marginTop: 16 }}>
+                  箱数
+                </label>
+                <div className="box-row">
+                  <button className="btn sm" onClick={() => setBoxes(Math.max(0, boxes - 1))} aria-label="减少一箱">
+                    −
+                  </button>
+                  <input
+                    className="input num"
+                    inputMode="numeric"
+                    value={boxes || ''}
+                    onChange={(e) => setBoxes(Math.max(0, Number(e.target.value) || 0))}
+                    placeholder="0"
+                  />
+                  <button className="btn sm" onClick={() => setBoxes(boxes + 1)} aria-label="增加一箱">
+                    +
+                  </button>
+                  <button className="btn sm" onClick={() => setBoxes(FULL_PALLET)}>
+                    满板
+                  </button>
+                </div>
+
+                <div className="stack-sum" style={{ marginTop: 12 }}>
+                  <div>
+                    <b>{boxes}</b>
+                    <span>箱</span>
+                  </div>
+                  <div>
+                    <b>{boxes * sku.perBox}</b>
+                    <span>件</span>
+                  </div>
+                  <div>
+                    <b>{leftBoxes - boxes}</b>
+                    <span>该日期剩余</span>
+                  </div>
+                </div>
+
+                {over > 0 && (
+                  <div className="alert" style={{ margin: '10px 0 0' }}>
+                    这个日期只剩 {leftBoxes} 箱，超出 {over} 箱，发车时会记成超发
+                  </div>
+                )}
+                {boxes > FULL_PALLET && (
+                  <div className="hint" style={{ margin: '8px 2px 0' }}>
+                    {boxes} 箱会自动装成 {Math.ceil(boxes / FULL_PALLET)} 块板（整板 {FULL_PALLET} 箱）
+                  </div>
+                )}
+
+                <button className="btn primary" style={{ marginTop: 14 }} onClick={addItem}>
+                  加入订单
+                </button>
+              </>
+            )}
+
+            {sku && dates.length === 0 && (
+              <div className="hint" style={{ margin: '10px 2px 0' }}>
+                这个品还没有库存，先去「库存」入库再发
+              </div>
+            )}
+          </div>
+        )}
+
+        {items.length > 0 && (
+          <>
+            <div className="section-head">
+              <span>已加入 {items.length} 项</span>
+              <span className="num">
+                {totalBoxes} 箱 · {totalQty} 件
+              </span>
+            </div>
+            {items.map((it) => {
+              const k = db.skus.find((s) => s.id === it.skuId)
+              const pallets = Math.max(1, Math.ceil(it.boxes / FULL_PALLET))
+              return (
+                <div className="card card-pad pallet-card" key={it.key}>
+                  <div className="pallet-head">
+                    <span className="pallet-name">{k?.shortName ?? '—'}</span>
+                    <span className="pallet-boxes">{it.boxes} 箱</span>
+                  </div>
+                  <div className="pallet-meta">
+                    <span className="dot" style={{ background: k?.accentColor ?? '#999' }} />
+                    {fmtDate(it.prodDate)} · {it.boxes * (k?.perBox ?? 0)} 件 · {pallets} 块板
+                  </div>
+                  <div className="pallet-actions">
+                    <button
+                      className="btn sm"
+                      onClick={() => setItems((p) => p.filter((x) => x.key !== it.key))}
+                    >
+                      删掉
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </>
+        )}
+
+        <div style={{ height: 12 }} />
       </div>
 
-      <button
-        className="btn primary"
-        style={{ marginTop: 24 }}
-        onClick={() => {
-          if (!destination.trim()) return toast('先填收货地')
-          const id = createOrder({ destination, customerId })
-          setDestination('')
-          onCreated(id)
-          onClose()
-        }}
-      >
-        创建车次
-      </button>
-    </Sheet>
+      <div className="dock">
+        <button className="btn primary" onClick={create} disabled={!destination.trim() || !customerId}>
+          {items.length > 0 ? `创建车次（${totalBoxes} 箱）` : '创建车次'}
+        </button>
+      </div>
+    </>
   )
 }
 
@@ -181,7 +413,7 @@ function PalletSheet({
                   onClick={() => setProdDate(d.prodDate)}
                 >
                   {fmtDate(d.prodDate)}
-                  <em>{d.left}</em>
+                  <em>{Math.floor(d.left / (sku.perBox || 1))}</em>
                 </button>
               ))}
             </div>
@@ -328,6 +560,18 @@ export default function Load() {
     setViewerOpen(true)
   }
 
+  if (creating) {
+    return (
+      <NewOrderForm
+        onCancel={() => setCreating(false)}
+        onCreated={() => {
+          setCreating(false)
+          toast('车次已建好')
+        }}
+      />
+    )
+  }
+
   if (!draft) {
     return (
       <>
@@ -353,7 +597,6 @@ export default function Load() {
             </div>
           </div>
         </div>
-        <NewOrderSheet open={creating} onClose={() => setCreating(false)} onCreated={() => toast('车次已建好')} />
         <Viewer3D
           open={viewerOpen}
           order={shippedPreview}
@@ -462,7 +705,6 @@ export default function Load() {
         </button>
       </div>
 
-      <NewOrderSheet open={creating} onClose={() => setCreating(false)} onCreated={() => toast('车次已建好')} />
       {picking && <PalletSheet open order={draft} editing={null} onClose={() => setPicking(false)} />}
       {editing && <PalletSheet key={editing.id} open order={draft} editing={editing} onClose={() => setEditing(null)} />}
 

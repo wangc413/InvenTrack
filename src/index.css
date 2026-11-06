@@ -149,6 +149,13 @@ button:active {
   margin-bottom: 2px;
 }
 
+/* 带返回按钮的页面：返回键排到标题前面 */
+.topbar.back-mode > .icon-btn {
+  order: 0;
+  margin-left: -4px;
+  margin-right: -4px;
+}
+
 .icon-btn {
   width: 34px;
   height: 34px;
@@ -1106,6 +1113,13 @@ textarea.input {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--sub);
+  margin-left: 4px;
+}
+
+/* 日期 chip 里带的库存数，用斜杠分开，免得跟日期粘成一串 */
+.chip em::before {
+  content: '· ';
+  opacity: 0.55;
 }
 
 .chip.on {
@@ -1220,6 +1234,30 @@ textarea.input {
   gap: 8px;
   margin-top: 12px;
   text-align: center;
+}
+
+/* 箱数输入行 */
+.box-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.box-row .input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+}
+
+.box-row .btn.sm {
+  flex: 0 0 auto;
+  height: 44px;
+  min-width: 46px;
+  padding: 0 12px;
+  font-size: 15px;
 }
 
 .stack-sum > div {
