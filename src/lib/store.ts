@@ -112,11 +112,20 @@ export type DB = {
   orders: Order[]
   trucks: Truck[]
   seq: number
+  /** 数据版本，用来判断要不要跑一次性补数 */
+  version?: number
 }
 
 const KEY = 'inventrack.v1'
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
+
+/** n 天前的日期，YYYY-MM-DD */
+const daysAgo = (n: number) => {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
 
 /** 一块拖板折成多少箱 */
 export const palletBoxes = (p: Pallet) =>
@@ -130,13 +139,16 @@ export const CUSTOMER_HM = 'c-hm'
 export const CUSTOMER_KLH = 'c-klh'
 export const CUSTOMER_CYY = 'c-cyy'
 
+/** 盒马示例库存：这几个「几天前」作为生产日期，每个品每个日期都是 200 箱 */
+export const HM_STOCK_DAYS = [9, 6, 3, 1]
+export const HM_STOCK_BOXES = 200
+
+/** 数据版本：升级时靠它判断要不要补示例数据 */
+const DATA_VERSION = 2
+
 function seed(): DB {
   const now = Date.now()
-  const day = (n: number) => {
-    const d = new Date()
-    d.setDate(d.getDate() - n)
-    return d.toISOString().slice(0, 10)
-  }
+  const day = daysAgo
 
   const customers: Customer[] = [
     { id: CUSTOMER_HM, name: '盒马', short: '盒马' },
@@ -235,12 +247,12 @@ function seed(): DB {
 
   const byId = (id: string) => skus.find((s) => s.id === id)!
 
-  stock(byId('sku-meat'), day(4), 120)
-  stock(byId('sku-meat'), day(2), 96)
-  stock(byId('sku-meat'), day(1), 240)
-  stock(byId('sku-green'), day(8), 144)
-  stock(byId('sku-green'), day(3), 180)
-  stock(byId('sku-shaomai'), day(4), 216)
+  /** 盒马示例库存：每个品、每个生产日期都是 200 箱，方便按整板整板地试 */
+  for (const s of skus.filter((x) => x.customerId === CUSTOMER_HM)) {
+    for (const n of HM_STOCK_DAYS) stock(s, day(n), HM_STOCK_BOXES * (s.perBox || 1))
+  }
+
+  // 其他收货方留少量库存，方便试「库存不足」的拦截
   stock(byId('sku-green-klh'), day(2), 96)
   stock(byId('sku-meat-cyy'), day(3), 80)
 
@@ -252,6 +264,7 @@ function seed(): DB {
     orders: [],
     trucks: [{ id: uid(), name: '4.2米厢货', L: 4200, W: 2000, H: 2200, maxWeight: 2000 }],
     seq: 1,
+    version: DATA_VERSION,
   }
 }
 
@@ -355,6 +368,56 @@ function migrate(raw: Record<string, unknown>): DB {
     H: t.H < 100 ? t.H * 10 : t.H,
   }))
 
+  // v2：盒马示例库存补到「每个品、每个日期 200 箱」。只补差额，不动已有单据和批次
+  const version = Number(data.version) || 1
+  if (version < 2) {
+    const leftOfBatch = new Map<string, number>()
+    for (const m of moves) {
+      if (!m.batchId || m.voided) continue
+      leftOfBatch.set(m.batchId, (leftOfBatch.get(m.batchId) ?? 0) + m.qty)
+    }
+    const leftOfDate = (skuId: string, prodDate: string) => {
+      let n = 0
+      for (const b of batches) {
+        if (b.skuId !== skuId || (b.prodDate || '') !== prodDate) continue
+        n += leftOfBatch.get(b.id) ?? 0
+      }
+      return n
+    }
+    for (const sku of skus.filter((s) => s.customerId === CUSTOMER_HM)) {
+      for (const back of HM_STOCK_DAYS) {
+        const prodDate = daysAgo(back)
+        const target = HM_STOCK_BOXES * (sku.perBox || 1)
+        const need = target - leftOfDate(sku.id, prodDate)
+        if (need <= 0) continue
+        let batch = batches.find((b) => b.skuId === sku.id && (b.prodDate || '') === prodDate)
+        if (batch) {
+          batch.qty += need
+        } else {
+          batch = {
+            id: uid(),
+            skuId: sku.id,
+            batchNo: prodDate.replace(/-/g, ''),
+            qty: need,
+            prodDate,
+            createdAt: Date.now(),
+          }
+          batches.push(batch)
+        }
+        moves.push({
+          id: uid(),
+          at: Date.now(),
+          type: 'in',
+          skuId: sku.id,
+          batchId: batch.id,
+          qty: need,
+          ref: '示例补齐',
+          note: '盒马示例库存补到 200 箱/日期',
+        })
+      }
+    }
+  }
+
   return {
     customers,
     skus,
@@ -363,6 +426,7 @@ function migrate(raw: Record<string, unknown>): DB {
     orders,
     trucks,
     seq: data.seq ?? 1,
+    version: DATA_VERSION,
   }
 }
 
@@ -467,6 +531,8 @@ export async function initStore() {
     const stored = await idbGet(IDB_KEY)
     if (stored && typeof stored === 'object') {
       state = migrate(stored as Record<string, unknown>)
+      // 迁移结果立刻落盘：像「补库存」这种一次性动作靠 version 标记，重跑就会重复补
+      await idbSet(IDB_KEY, state)
     } else if (local) {
       state = local
       await idbSet(IDB_KEY, local)
@@ -484,6 +550,14 @@ export async function initStore() {
     state = local ?? seed()
     info.mode = 'local'
     if (!local) info.error = '这台手机的浏览器不支持数据库，已退回缓存模式，容量有限'
+    else {
+      // localStorage 里的老数据也带上了迁移结果，写回去免得下次再补一遍
+      try {
+        localStorage.setItem(KEY, JSON.stringify(state))
+      } catch {
+        /* 忽略 */
+      }
+    }
   }
 
   info.chars = JSON.stringify(state).length

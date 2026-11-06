@@ -82,12 +82,24 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     setProdDate('')
   }
 
+  /** 这个日期账面上有多少箱 */
+  const leftBoxes = picked && sku ? boxesOf(picked.left, sku.perBox) : 0
+  /** 同一车已经占掉的箱数（同一个品 + 同一个日期） */
+  const takenBoxes = useMemo(() => {
+    if (!sku || !prodDate) return 0
+    return items
+      .filter((i) => i.skuId === sku.id && i.prodDate === prodDate)
+      .reduce((n, i) => n + i.boxes, 0)
+  }, [items, sku, prodDate])
+  /** 这次最多还能装多少箱 */
+  const avail = Math.max(0, leftBoxes - takenBoxes)
+
   const pickSku = (id: string) => {
     setSkuId(id)
     const list = stockByDate(db, id)
     const first = list[0]?.prodDate ?? ''
     setProdDate(first)
-    // 默认箱数取「满板」和「这个日期还剩多少箱」里小的那个，免得一上来就超发
+    // 默认箱数取「满板」和「这个日期还剩多少箱」里小的那个，免得一上来就超库存
     const k = db.skus.find((s) => s.id === id)
     const cap = first ? Math.floor((list[0]?.left ?? 0) / (k?.perBox || 1)) : 0
     setBoxes(cap > 0 ? Math.min(FULL_PALLET, cap) : FULL_PALLET)
@@ -97,6 +109,10 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     if (!sku) return toast('先选一个品')
     if (!prodDate) return toast('这个品还没有库存')
     if (boxes <= 0) return toast('箱数要大于 0')
+    // 同一车、同一个品同一个日期可能已经加过板，先把已占的扣掉
+    if (boxes > avail) {
+      return toast(`库存不足：${fmtDate(prodDate)} 只剩 ${avail} 箱`)
+    }
     setItems((p) => [...p, { key: `${Date.now()}-${Math.random()}`, skuId: sku.id, prodDate, boxes }])
     // 收回到「选品」这一步，免得旧箱数对着新日期一直报超发
     setSkuId('')
@@ -115,8 +131,7 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     onCreated(id)
   }
 
-  const leftBoxes = picked && sku ? boxesOf(picked.left, sku.perBox) : 0
-  const over = picked && sku ? boxes - leftBoxes : 0
+  const over = picked && sku ? boxes - avail : 0
 
   return (
     <>
@@ -244,23 +259,29 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
                     <span>件</span>
                   </div>
                   <div>
-                    <b>{leftBoxes - boxes}</b>
+                    <b style={{ color: over > 0 ? 'var(--danger)' : undefined }}>{avail - boxes}</b>
                     <span>该日期剩余</span>
                   </div>
                 </div>
 
                 {over > 0 && (
                   <div className="alert" style={{ margin: '10px 0 0' }}>
-                    这个日期只剩 {leftBoxes} 箱，超出 {over} 箱，发车时会记成超发
+                    库存不足：{fmtDate(prodDate)} 还能装 {avail} 箱
+                    {takenBoxes > 0 ? `（本车已占 ${takenBoxes} 箱）` : ''}，请减少 {over} 箱
                   </div>
                 )}
-                {boxes > FULL_PALLET && (
+                {boxes > FULL_PALLET && over <= 0 && (
                   <div className="hint" style={{ margin: '8px 2px 0' }}>
                     {boxes} 箱会自动装成 {Math.ceil(boxes / FULL_PALLET)} 块板（整板 {FULL_PALLET} 箱）
                   </div>
                 )}
 
-                <button className="btn primary" style={{ marginTop: 14 }} onClick={addItem}>
+                <button
+                  className="btn primary"
+                  style={{ marginTop: 14 }}
+                  onClick={addItem}
+                  disabled={over > 0 || boxes <= 0}
+                >
                   加入订单
                 </button>
               </>
@@ -349,8 +370,14 @@ function PalletSheet({
   const boxes = Math.max(0, (layers - 1) * perLayer + top)
   const qty = sku ? boxes * sku.perBox : 0
   const picked = dates.find((d) => d.prodDate === prodDate)
-  /** 这个日期还剩多少箱，可装 */
+  /** 这个日期账面上还剩多少箱 */
   const leftBoxes = sku ? Math.floor((picked?.left ?? 0) / (sku.perBox || 1)) : 0
+  /** 同一车、同一个品同一个日期，别的板已经占掉的 */
+  const takenBoxes = order.pallets
+    .filter((p) => p.skuId === skuId && p.prodDate === prodDate && p.id !== editing?.id)
+    .reduce((n, p) => n + palletBoxes(p), 0)
+  /** 这块板最多能装多少箱 */
+  const avail = Math.max(0, leftBoxes - takenBoxes)
 
   const pickSku = (id: string) => {
     setSkuId(id)
@@ -360,6 +387,8 @@ function PalletSheet({
   const save = () => {
     if (!sku) return toast('先选一个品')
     if (!prodDate) return toast('这个品还没有库存')
+    if (boxes <= 0) return toast('箱数要大于 0')
+    if (boxes > avail) return toast(`库存不足：这个日期最多只能装 ${avail} 箱`)
     const payload = { skuId, prodDate, layers, perLayer, topCount: top }
     if (editing) updatePallet(order.id, editing.id, payload)
     else addPallet(order.id, payload)
@@ -458,21 +487,22 @@ function PalletSheet({
               <span>件</span>
             </div>
             <div>
-              <b>{picked ? leftBoxes : 0}</b>
-              <span>该日期剩余</span>
+              <b style={{ color: boxes > avail ? 'var(--danger)' : undefined }}>{avail}</b>
+              <span>该日期可装</span>
             </div>
           </div>
 
-          {picked && leftBoxes < boxes && (
+          {picked && boxes > avail && (
             <div className="alert" style={{ margin: '10px 0 0' }}>
-              这个日期只有 {leftBoxes} 箱，装完会超出 {boxes - leftBoxes} 箱
+              库存不足：这个日期最多装 {avail} 箱
+              {takenBoxes > 0 ? `（本车已占 ${takenBoxes} 箱）` : ''}，请减少 {boxes - avail} 箱
             </div>
           )}
         </>
       )}
 
       <div className="sheet-actions">
-        <button className="btn primary" onClick={save} disabled={!sku || !prodDate}>
+        <button className="btn primary" onClick={save} disabled={!sku || !prodDate || boxes > avail}>
           {editing ? '保存' : '加到车上'}
         </button>
       </div>
@@ -556,7 +586,8 @@ export default function Load() {
         .slice(0, 3)
         .map((s) => `${s.sku.shortName} ${fmtDate(s.prodDate)} 差 ${Math.ceil(s.short / (s.sku.perBox || 1))} 箱`)
         .join('\n')
-      if (!confirm(`这些货不够：\n${msg}\n\n仍然发车？缺口会记成超发。`)) return
+      alert(`库存不足，不能发车：\n${msg}\n\n请减少箱数，或先入库再发。`)
+      return
     }
     shipOrder(draft.id)
     setShippedPreview({ ...draft, status: 'shipped' })
