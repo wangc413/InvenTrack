@@ -119,7 +119,10 @@ function baoPlan(sku: Sku): LayerPlan {
  * 烧麦的固定码法：一层 5 个 = 后排 3 竖 + 前排 2 横。
  *
  *   竖：410 顺着 1.2 m 那边，3 个并排（3×410 = 1230，两边各挤 15 mm）
- *   横：465 顺着 1.2 m 那边，2 个摆前面，中间自然留一道缝
+ *   横：465 顺着 1.2 m 那边，2 个摆前面，**贴两侧、中间留一道缝**
+ *
+ * 前排两个的外沿跟后排的外沿对齐（现场就是这么摆的，能看出来中间是空的），
+ * 缝宽 = 3×410 − 2×465 = 300 mm。
  *
  * 进深 465 + 410 = 875，1 m 这边还宽裕，叉车插得进。
  */
@@ -127,16 +130,19 @@ function shaomaiPlan(sku: Sku): LayerPlan {
   const l = Math.max(1, sku.boxL) // 465
   const w = Math.max(1, sku.boxW) // 410
   const spanZ = l + w
+  /** 前排两个中间的缝：对齐后排外沿，不留负值 */
+  const gap = Math.max(0, 3 * w - 2 * l)
+  const stepX = l + gap
   const slots: Slot[] = []
   // 后排 3 竖：长边（l）顺进深方向，w 顺着 1.2 m 并排
   for (let i = 0; i < 3; i++) {
     slots.push({ x: (i - 1) * w, z: -spanZ / 2 + l / 2, turn: true })
   }
-  // 前排 2 横：l 顺着 1.2 m
+  // 前排 2 横：l 顺着 1.2 m，两边各靠外沿，中间空出 gap
   for (let j = 0; j < 2; j++) {
-    slots.push({ x: (j - 0.5) * l, z: -spanZ / 2 + l + w / 2, turn: false })
+    slots.push({ x: (j - 0.5) * stepX, z: -spanZ / 2 + l + w / 2, turn: false })
   }
-  return { perLayer: slots.length, slots, note: '3 竖 + 2 横', fixed: true }
+  return { perLayer: slots.length, slots, note: '3 竖 + 2 横（留缝）', fixed: true }
 }
 
 /** 包子、烧麦走现场固定码法，其余按箱规铺方阵 */
