@@ -469,3 +469,23 @@ export function fmtTime(at: number) {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+
+/** 1 → 一、11 → 十一、23 → 二十三；超过两位的懒得念，直接给数字 */
+const CN_NUM = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+export function cnNum(n: number) {
+  if (n < 10) return CN_NUM[n]
+  if (n === 10) return '十'
+  if (n < 20) return `十${CN_NUM[n % 10]}`
+  if (n < 100) {
+    const t = Math.floor(n / 10)
+    const u = n % 10
+    return `${CN_NUM[t]}十${u ? CN_NUM[u] : ''}`
+  }
+  return String(n)
+}
+
+/** 板号给人看的话就是「第一板」这种，不用 P1 */
+export function palletName(no: string) {
+  const m = /^P(\d+)$/.exec(no)
+  return m ? `第${cnNum(Number(m[1]))}板` : no
+}

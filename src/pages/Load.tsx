@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Box3D from '../components/Box3D'
 import { Icon, Stepper, toast } from '../components/UI'
-import { PALLET_H, fmt, fmtDate, layerExpr, layerPlan, maxLayers, summarize } from '../lib/calc'
+import {
+  PALLET_H,
+  fmt,
+  fmtDate,
+  layerExpr,
+  layerPlan,
+  maxLayers,
+  palletName,
+  summarize,
+} from '../lib/calc'
 import {
   DEFAULT_LAYERS,
   DEFAULT_PER_LAYER,
@@ -233,7 +242,8 @@ function overText(over: { x: number; z: number }) {
   const tooTall = layers > softLayers
 
   const palletNo = editing?.no ?? `P${order.pallets.length + 1}`
-  const nextNo = `P${order.pallets.length + 2}`
+  const palletLabel = palletName(palletNo)
+  const nextLabel = palletName(`P${order.pallets.length + 2}`)
 
   const pickSku = (s: Sku) => {
     setSkuId(s.id)
@@ -259,12 +269,12 @@ function overText(over: { x: number; z: number }) {
     const payload = { skuId, prodDate, layers, perLayer, topCount: top }
     if (editing) {
       updatePallet(order.id, editing.id, payload)
-      toast(`${editing.no} 已改好`)
+      toast(`${palletName(editing.no)} 已改好`)
       onBack()
       return
     }
     addPallet(order.id, payload)
-    toast(`${palletNo} 已上车，接着装 ${nextNo}`)
+    toast(`${palletLabel} 已上车，接着装 ${nextLabel}`)
     // 清空选品，3D 回到一块空托盘 —— 这就是「自动跳到下一板」
     setSkuId('')
     setProdDate('')
@@ -287,7 +297,7 @@ function overText(over: { x: number; z: number }) {
             <Icon name="back" size={22} />
           </button>
           <h1>
-            {palletNo}
+            {palletLabel}
             {editing ? ' · 改这块' : ''}
           </h1>
           <p className="sub">
@@ -406,7 +416,7 @@ function overText(over: { x: number; z: number }) {
 
       <div className="dock">
         <button className="btn primary" onClick={putOn} disabled={!sku || boxes <= 0 || over > 0}>
-          {editing ? `保存 ${palletNo}` : `装上 ${palletNo} · 接着装 ${nextNo}`}
+          {editing ? `保存 ${palletLabel}` : '下一板'}
         </button>
       </div>
     </>
@@ -616,7 +626,7 @@ export default function Load() {
           return (
             <div className="card pallet-card" key={p.id}>
               <div className="pallet-head">
-                <span className="pallet-no">{p.no}</span>
+                <span className="pallet-no">{palletName(p.no)}</span>
                 <b className="pallet-name">
                   <span className="dot" style={{ background: sku?.accentColor ?? '#999' }} />
                   <span className="pallet-name-text">{sku ? nickOf(sku) : '品项已删除'}</span>
@@ -634,7 +644,7 @@ export default function Load() {
                     label="移除"
                     onConfirm={() => {
                       removePallet(draft.id, p.id)
-                      toast(`${p.no} 已移除`)
+                      toast(`${palletName(p.no)} 已移除`)
                     }}
                   />
                 </span>
@@ -644,7 +654,7 @@ export default function Load() {
         })}
 
         <button className="btn" style={{ marginTop: 12 }} onClick={() => setPacking({})}>
-          + 继续装板（P{draft.pallets.length + 1}）
+          + 继续装板（{palletName(`P${draft.pallets.length + 1}`)}）
         </button>
 
         <div style={{ height: 12 }} />
