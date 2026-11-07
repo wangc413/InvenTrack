@@ -85,6 +85,19 @@ export type Pallet = {
   createdAt: number
 }
 
+/**
+ * 一趟车的「要货计划」：这趟要发哪个品、哪个生产日期、多少箱。
+ * 建车时先定计划，装板时按计划一板一板码，发车前对账。
+ * 同一品不同日期是两行（例：11-02 肉包 150 箱、11-04 肉包 288 箱）。
+ */
+export type PlanLine = {
+  id: string
+  skuId: string
+  prodDate: string
+  /** 计划箱数 */
+  boxes: number
+}
+
 export type Order = {
   id: string
   no: string
@@ -95,6 +108,8 @@ export type Order = {
   createdAt: number
   status: 'draft' | 'shipped'
   pallets: Pallet[]
+  /** 要货计划；老车次没这个字段就是「没定计划」，行为跟以前一样 */
+  plan?: PlanLine[]
 }
 
 export type Truck = {
@@ -898,7 +913,27 @@ export function removeBatch(id: string) {
 
 /* ---------- 车次 ---------- */
 
-export function createOrder(input: { destination: string; customerId: string; remark?: string }) {
+/** 计划行规范化：丢掉没填全的，同品同日期合并箱数 */
+export function normalizePlan(lines: PlanLine[] | undefined): PlanLine[] {
+  const map = new Map<string, PlanLine>()
+  for (const l of lines ?? []) {
+    if (!l.skuId || !l.prodDate || !(l.boxes > 0)) continue
+    const key = `${l.skuId}|${l.prodDate}`
+    const boxes = Math.round(l.boxes)
+    const cur = map.get(key)
+    if (cur) cur.boxes += boxes
+    else map.set(key, { id: l.id || uid(), skuId: l.skuId, prodDate: l.prodDate, boxes })
+  }
+  // 保持录入顺序：用户先填哪行，对账卡片和装板顺序就按哪行来
+  return [...map.values()]
+}
+
+export function createOrder(input: {
+  destination: string
+  customerId: string
+  remark?: string
+  plan?: PlanLine[]
+}) {
   const d = new Date()
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
   const order: Order = {
@@ -910,6 +945,7 @@ export function createOrder(input: { destination: string; customerId: string; re
     createdAt: Date.now(),
     status: 'draft',
     pallets: [],
+    plan: normalizePlan(input.plan),
   }
   commit({ ...state, orders: [order, ...state.orders], seq: state.seq + 1 })
   return order.id
@@ -999,6 +1035,49 @@ export function needOf(order: Order) {
     need.set(p.skuId, (need.get(p.skuId) ?? 0) + palletBoxes(p))
   }
   return need
+}
+
+/** 这个「品 + 生产日期」计划要发多少箱 */
+export function plannedBoxes(order: Order, skuId: string, prodDate: string) {
+  return (order.plan ?? [])
+    .filter((l) => l.skuId === skuId && l.prodDate === prodDate)
+    .reduce((s, l) => s + l.boxes, 0)
+}
+
+/** 这个「品 + 生产日期」已经装了多少箱（可排除正在改的那一板） */
+export function loadedBoxes(order: Order, skuId: string, prodDate: string, exceptId?: string) {
+  return order.pallets
+    .filter((p) => p.skuId === skuId && p.prodDate === prodDate && p.id !== exceptId)
+    .reduce((s, p) => s + palletBoxes(p), 0)
+}
+
+/** 计划对账：每行计划多少 / 已装多少 / 还差多少，外加计划外装了什么 */
+export function planSummary(order: Order) {
+  const rest = new Map<string, number>()
+  for (const p of order.pallets) {
+    const key = `${p.skuId}|${p.prodDate}`
+    rest.set(key, (rest.get(key) ?? 0) + palletBoxes(p))
+  }
+  const lines = (order.plan ?? []).map((l) => {
+    const key = `${l.skuId}|${l.prodDate}`
+    const done = rest.get(key) ?? 0
+    rest.delete(key)
+    return { ...l, done, left: l.boxes - done }
+  })
+  // 剩下的都是「计划里没写、却装上去了」的货，得显性化
+  const extra = [...rest.entries()].map(([key, boxes]) => {
+    const [skuId, prodDate] = key.split('|')
+    return { skuId, prodDate, boxes }
+  })
+  return {
+    lines,
+    extra,
+    planBoxes: lines.reduce((s, l) => s + l.boxes, 0),
+    doneBoxes: lines.reduce((s, l) => s + Math.min(l.done, l.boxes), 0),
+    leftBoxes: lines.reduce((s, l) => s + Math.max(0, l.left), 0),
+    overBoxes: lines.reduce((s, l) => s + Math.max(0, -l.left), 0),
+    extraBoxes: extra.reduce((s, l) => s + l.boxes, 0),
+  }
 }
 
 /** 发车前对账：某个品项某个日期够不够（按生产日期要货，就不能从别的日期挪） */

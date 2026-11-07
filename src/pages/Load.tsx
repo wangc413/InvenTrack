@@ -17,18 +17,24 @@ import {
   addPallet,
   createOrder,
   customerById,
+  loadedBoxes,
   nickOf,
+  normalizePlan,
   palletBoxes,
+  planSummary,
+  plannedBoxes,
   removeOrder,
   removePallet,
   shipOrder,
   shortages,
   skusOfCustomer,
   stockByDate,
+  updateOrder,
   updatePallet,
   useDB,
   type Order,
   type Pallet,
+  type PlanLine,
   type Sku,
 } from '../lib/store'
 
@@ -76,7 +82,138 @@ export function specOfOrder(db: ReturnType<typeof useDB>, order: Order): PalletS
   return out
 }
 
-/* ---------- 新建车次：只定「谁、送到哪」 ---------- */
+/* ---------- 要货计划：品 + 生产日期 + 箱数 ---------- */
+
+type PlanRow = { key: string; skuId: string; prodDate: string; boxes: string }
+const rowKey = () => Math.random().toString(36).slice(2, 9)
+const emptyRow = (): PlanRow => ({ key: rowKey(), skuId: '', prodDate: '', boxes: '' })
+const rowsToLines = (rows: PlanRow[]): PlanLine[] =>
+  rows.map((r) => ({ id: rowKey(), skuId: r.skuId, prodDate: r.prodDate, boxes: Number(r.boxes) || 0 }))
+const linesToRows = (lines: PlanLine[]): PlanRow[] =>
+  lines.length > 0
+    ? lines.map((l) => ({ key: rowKey(), skuId: l.skuId, prodDate: l.prodDate, boxes: String(l.boxes) }))
+    : [emptyRow()]
+
+/**
+ * 一行 = 一个品 + 一个生产日期 + 多少箱。
+ * 同品不同日期就写两行（11-02 肉包 150 箱、11-04 肉包 288 箱），复制按钮专门干这个。
+ * 日期用原生 date 控件，另外把「这个品有货的日期」列成小 chip，点一下就填。
+ */
+function PlanEditor({
+  db,
+  customerId,
+  rows,
+  onChange,
+}: {
+  db: ReturnType<typeof useDB>
+  customerId: string
+  rows: PlanRow[]
+  onChange: (rows: PlanRow[]) => void
+}) {
+  const skus = customerId ? skusOfCustomer(db, customerId) : []
+  const set = (key: string, patch: Partial<PlanRow>) =>
+    onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
+  const total = rows.reduce((s, r) => s + (Number(r.boxes) || 0), 0)
+  const valid = rows.filter((r) => r.skuId && r.prodDate && Number(r.boxes) > 0).length
+
+  return (
+    <div className="plan-editor">
+      {rows.map((r, i) => {
+        const sku = skus.find((s) => s.id === r.skuId)
+        const inStock = r.skuId ? stockByDate(db, r.skuId).slice(0, 4) : []
+        return (
+          <div className="plan-row" key={r.key}>
+            <div className="plan-row-head">
+              <span className="plan-idx">{i + 1}</span>
+              <select
+                className="plan-select"
+                value={r.skuId}
+                onChange={(e) => set(r.key, { skuId: e.target.value })}
+                aria-label="品项"
+              >
+                <option value="">选品…</option>
+                {skus.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {nickOf(s)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="plan-mini"
+                onClick={() => {
+                  const copy: PlanRow = { ...r, key: rowKey(), prodDate: '', boxes: '' }
+                  onChange([...rows.slice(0, i + 1), copy, ...rows.slice(i + 1)])
+                }}
+              >
+                复制
+              </button>
+              <button
+                type="button"
+                className="plan-mini danger"
+                aria-label="删掉这一行"
+                onClick={() => onChange(rows.filter((x) => x.key !== r.key))}
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
+
+            <div className="plan-row-fields">
+              <input
+                className="input plan-date"
+                type="date"
+                value={r.prodDate}
+                onChange={(e) => set(r.key, { prodDate: e.target.value })}
+                aria-label="生产日期"
+              />
+              <div className="plan-boxes">
+                <input
+                  className="input"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  placeholder="箱数"
+                  value={r.boxes}
+                  onChange={(e) => set(r.key, { boxes: e.target.value })}
+                  aria-label="箱数"
+                />
+                <em>箱</em>
+              </div>
+            </div>
+
+            {inStock.length > 0 && (
+              <div className="plan-quick">
+                <span>有货</span>
+                {inStock.map((d) => (
+                  <button
+                    key={d.prodDate}
+                    type="button"
+                    className={`chip tiny ${r.prodDate === d.prodDate ? 'on' : ''}`}
+                    onClick={() => set(r.key, { prodDate: d.prodDate })}
+                  >
+                    {fmtDate(d.prodDate)}
+                    <em className="chip-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      <button type="button" className="btn plan-add" onClick={() => onChange([...rows, emptyRow()])}>
+        + 再加一行
+      </button>
+      {rows.length > 0 && (
+        <div className="plan-total">
+          填好 <b>{valid}</b> 行 · 合计 <b>{total}</b> 箱
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ---------- 新建车次：送到哪、发给谁、发哪些货 ---------- */
 
 /** 收货地记忆：输过一次就记住，存在本地，清数据也不丢 */
 const DEST_KEY = 'inventrack-destinations'
@@ -115,13 +252,24 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
 
   const [destination, setDestination] = useState('')
   const [customerId, setCustomerId] = useState('')
+  const [planRows, setPlanRows] = useState<PlanRow[]>([emptyRow()])
+
+  /** 换收货方时，把不属于新收货方的品清掉，免得串货 */
+  const pickCustomer = (id: string) => {
+    setCustomerId(id)
+    const allowed = new Set(skusOfCustomer(db, id).map((s) => s.id))
+    setPlanRows((rows) => rows.map((r) => (allowed.has(r.skuId) ? r : { ...r, skuId: '' })))
+  }
 
   const create = () => {
     const dest = destination.trim()
     if (!dest) return toast('先填收货地')
     if (!customerId) return toast('先选收货方')
+    const filled = planRows.filter((r) => r.skuId || r.prodDate || r.boxes)
+    if (filled.some((r) => !r.skuId || !r.prodDate || !(Number(r.boxes) > 0)))
+      return toast('要货计划有没填全的行：品、日期、箱数都要填')
     rememberDestination(dest)
-    const id = createOrder({ destination: dest, customerId })
+    const id = createOrder({ destination: dest, customerId, plan: rowsToLines(filled) })
     onCreated(id)
   }
 
@@ -133,7 +281,7 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
             <Icon name="back" size={22} />
           </button>
           <h1>新建车次</h1>
-          <p className="sub">先定送到哪、发给谁，装什么进场再说</p>
+          <p className="sub">送到哪、发给谁、这趟发哪些货，一次填好</p>
         </header>
 
         <div className="card card-pad">
@@ -167,14 +315,26 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
               <button
                 key={c.id}
                 className={`chip ${customerId === c.id ? 'on' : ''}`}
-                onClick={() => setCustomerId(c.id)}
+                onClick={() => pickCustomer(c.id)}
               >
                 {c.name}
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="card card-pad" style={{ marginTop: 8 }}>
+          <label className="field-label">3 · 这趟要发什么</label>
+          <div className="hint" style={{ margin: '0 2px 10px' }}>
+            一个品 + 一个生产日期 + 箱数写一行；同品不同日期就写两行
+          </div>
+          {customerId ? (
+            <PlanEditor db={db} customerId={customerId} rows={planRows} onChange={setPlanRows} />
+          ) : (
+            <div className="hint">先选收货方，再挑这个收货方的品</div>
+          )}
           <div className="hint" style={{ margin: '12px 2px 0' }}>
-            一趟车只发一个收货方。建好之后直接进展板界面，装多少板当场看着码。
+            定好计划后，装板会按日期和箱数一板一板带出来，发车前自动对账。
           </div>
         </div>
 
@@ -190,6 +350,44 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
   )
 }
 
+/** 建好之后也能回来改计划，免得填错了整趟车删掉重来 */
+function PlanEditPage({ order, onCancel, onSaved }: { order: Order; onCancel: () => void; onSaved: () => void }) {
+  const db = useDB()
+  const [rows, setRows] = useState<PlanRow[]>(() => linesToRows(order.plan ?? []))
+
+  const save = () => {
+    const filled = rows.filter((r) => r.skuId || r.prodDate || r.boxes)
+    if (filled.some((r) => !r.skuId || !r.prodDate || !(Number(r.boxes) > 0)))
+      return toast('要货计划有没填全的行：品、日期、箱数都要填')
+    updateOrder(order.id, { plan: normalizePlan(rowsToLines(filled)) })
+    toast('要货计划已更新')
+    onSaved()
+  }
+
+  return (
+    <>
+      <div className="page with-dock">
+        <header className="topbar back-mode">
+          <button className="icon-btn" onClick={onCancel} aria-label="返回">
+            <Icon name="back" size={22} />
+          </button>
+          <h1>改要货计划</h1>
+          <p className="sub">{order.destination} · {order.no}</p>
+        </header>
+        <div className="card card-pad">
+          <PlanEditor db={db} customerId={order.customerId} rows={rows} onChange={setRows} />
+        </div>
+        <div style={{ height: 12 }} />
+      </div>
+      <div className="dock">
+        <button className="btn primary" onClick={save}>
+          保存计划
+        </button>
+      </div>
+    </>
+  )
+}
+
 /* ---------- 装板工作台 ---------- */
 
 /**
@@ -199,6 +397,13 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
 function PackingBoard({ order, editing, onBack }: { order: Order; editing: Pallet | null; onBack: () => void }) {
   const db = useDB()
   const skus = skusOfCustomer(db, order.customerId)
+  const planLines = order.plan ?? []
+  const ps = planSummary(order)
+  const planSkuIds = new Set(planLines.map((l) => l.skuId))
+  /** 计划里的品排前面，现场临时加货仍能从下面挑 */
+  const orderedSkus = [...skus].sort(
+    (a, b) => Number(planSkuIds.has(b.id)) - Number(planSkuIds.has(a.id)),
+  )
 
   const [skuId, setSkuId] = useState(editing?.skuId ?? '')
   const [prodDate, setProdDate] = useState(editing?.prodDate ?? '')
@@ -208,7 +413,22 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const [menu, setMenu] = useState<'sku' | 'date' | null>(null)
 
   const sku = skus.find((s) => s.id === skuId) ?? null
-  const dates = sku ? stockByDate(db, sku.id) : []
+  const stockDates = sku ? stockByDate(db, sku.id) : []
+  /** 日期 = 计划里定的日期 ∪ 有库存的日期；计划日期就算还没入库也要能看见 */
+  const dates = sku
+    ? [
+        ...new Set([
+          ...planLines.filter((l) => l.skuId === sku.id).map((l) => l.prodDate),
+          ...stockDates.map((d) => d.prodDate),
+        ]),
+      ]
+        .sort((a, b) => b.localeCompare(a))
+        .map((prodDate) => ({
+          prodDate,
+          left: stockDates.find((d) => d.prodDate === prodDate)?.left ?? 0,
+          planned: plannedBoxes(order, sku.id, prodDate),
+        }))
+    : []
   const picked = dates.find((d) => d.prodDate === prodDate)
 
   /** 一层比托盘多出来多少，给成「前后各 4.5 厘米」这样的人话（按单边算） */
@@ -245,18 +465,46 @@ function overText(over: { x: number; z: number }) {
   const palletLabel = palletName(palletNo)
   const nextLabel = palletName(`P${order.pallets.length + 2}`)
 
+  /**
+   * 按「这条计划还剩多少箱」自动配这一板：能码满就码满，装不满就自动收顶层。
+   * 一板最多码到 maxLayers（1.8 米），剩下的留给下一板，用户还能随时手动 + −。
+   */
+  const fitPlan = (s: Sku, d: string, doneOverride?: number) => {
+    const target = Math.max(
+      0,
+      plannedBoxes(order, s.id, d) - (doneOverride ?? loadedBoxes(order, s.id, d, editing?.id)),
+    )
+    const p = layerPlan(s)
+    if (target <= 0) {
+      setLayers(maxLayers(s))
+      setTopCount(p.perLayer)
+      return
+    }
+    const capMax = Math.max(1, Math.min(24, maxLayers(s)))
+    const cap = Math.max(1, Math.min(capMax, Math.ceil(target / p.perLayer)))
+    const top = target - (cap - 1) * p.perLayer
+    setLayers(cap)
+    setTopCount(Math.max(1, Math.min(p.perLayer, top)))
+  }
+
   const pickSku = (s: Sku) => {
     setSkuId(s.id)
-    setProdDate(stockByDate(db, s.id)[0]?.prodDate ?? '')
-    // 起点按这个品的固定码法算：满层几个、能码几层
-    setLayers(maxLayers(s))
-    setTopCount(layerPlan(s).perLayer)
+    // 优先带出这个品还没装齐的那个生产日期
+    const lines = planLines.filter((l) => l.skuId === s.id)
+    const next =
+      lines.find(
+        (l) => plannedBoxes(order, s.id, l.prodDate) > loadedBoxes(order, s.id, l.prodDate, editing?.id),
+      ) ?? lines[0]
+    const d = next?.prodDate ?? stockByDate(db, s.id)[0]?.prodDate ?? ''
+    setProdDate(d)
+    if (!editing && d) fitPlan(s, d)
     // 选品和日期是一个连贯动作：品定了，紧接着看这个品有哪些日期
     setMenu('date')
   }
 
   const pickDate = (d: string) => {
     setProdDate(d)
+    if (!editing && sku) fitPlan(sku, d)
     setMenu(null)
   }
 
@@ -274,20 +522,56 @@ function overText(over: { x: number; z: number }) {
       return
     }
     addPallet(order.id, payload)
-    toast(`${palletLabel} 已上车，接着装 ${nextLabel}`)
-    // 清空选品，3D 回到一块空托盘 —— 这就是「自动跳到下一板」
-    setSkuId('')
-    setProdDate('')
+
+    /** 刚放上去的那一板还没进 state，先手动算进去，才能找对下一条没装齐的计划 */
+    const doneAfter = (sid: string, pd: string) =>
+      loadedBoxes(order, sid, pd) + (sid === skuId && pd === prodDate ? boxes : 0)
+    const leftOf = (l: PlanLine) => l.boxes - doneAfter(l.skuId, l.prodDate)
+    // 先把手上这条（同品同日期）装齐，再按填计划的顺序往下走，不来回跳品
+    const next =
+      planLines.find((l) => l.skuId === skuId && l.prodDate === prodDate && leftOf(l) > 0) ??
+      planLines.find((l) => leftOf(l) > 0)
+    const nextSku = next ? skus.find((s) => s.id === next.skuId) : null
+    if (next && nextSku) {
+      setSkuId(nextSku.id)
+      setProdDate(next.prodDate)
+      fitPlan(nextSku, next.prodDate, doneAfter(nextSku.id, next.prodDate))
+      toast(`${palletLabel} 已上车 · 接着 ${nickOf(nextSku)} ${fmtDate(next.prodDate)}，还差 ${leftOf(next)} 箱`)
+    } else {
+      // 没有待装计划了，3D 回到一块空托盘
+      setSkuId('')
+      setProdDate('')
+      toast(
+        planLines.length > 0
+          ? `${palletLabel} 已上车 · 计划已装齐，可以发车了`
+          : `${palletLabel} 已上车，接着装 ${nextLabel}`,
+      )
+    }
   }
 
   const spec = sku ? [{ no: palletNo, sku, layers, perLayer, topCount: top }] : []
   const stackH = sku ? (layers * sku.boxH + PALLET_H) / 1000 : 0
   const warn =
     over > 0
-      ? `库存不足：这天只能装 ${avail} 箱`
+      ? avail <= 0
+        ? '这天还没入库，先去「库存」页录入'
+        : `库存不足：这天只能装 ${avail} 箱`
       : tooTall
         ? `码高 ${fmt(stackH, 2)} m，超过 1.8 m`
         : ''
+
+  /** 有计划时，HUD 上那行小字改成「这一条还差多少」，装一板就能对一次账 */
+  const planBoxesHere = sku && prodDate ? plannedBoxes(order, sku.id, prodDate) : 0
+  const planDoneHere = sku && prodDate ? loadedBoxes(order, sku.id, prodDate, editing?.id) : 0
+  const planLeftAfter = planBoxesHere > 0 ? Math.max(0, planBoxesHere - planDoneHere - boxes) : 0
+  const planHint =
+    planBoxesHere > 0
+      ? planLeftAfter > 0
+        ? `还差 ${planLeftAfter} 箱 · 计划 ${planBoxesHere} 箱`
+        : `已装齐 · 计划 ${planBoxesHere} 箱`
+      : prodDate
+        ? `这天还能装 ${avail} 箱`
+        : '还没选生产日期'
 
   return (
     <>
@@ -302,6 +586,7 @@ function overText(over: { x: number; z: number }) {
           </h1>
           <p className="sub">
             {order.destination} · 已装 {order.pallets.length} 板
+            {planLines.length > 0 ? ` · 计划 ${ps.planBoxes} 箱 / 已装 ${ps.doneBoxes} 箱` : ''}
           </p>
         </header>
 
@@ -329,21 +614,31 @@ function overText(over: { x: number; z: number }) {
               <div className="picker-mask" onClick={() => setMenu(null)} />
               <div className="picker-pop">
                 <div className="picker-pop-title">
-                  {menu === 'sku' ? '这趟发哪几个品' : `${sku ? nickOf(sku) : ''} · 用哪个生产日期`}
+                  {menu === 'sku'
+                    ? planLines.length > 0
+                      ? '这趟要发这些品（按计划排在前面）'
+                      : '这趟发哪几个品'
+                    : `${sku ? nickOf(sku) : ''} · 用哪个生产日期`}
                 </div>
                 {menu === 'sku' &&
                   (skus.length > 0 ? (
                     <div className="chips">
-                      {skus.map((s) => (
-                        <button
-                          key={s.id}
-                          className={`chip ${skuId === s.id ? 'on' : ''}`}
-                          onClick={() => pickSku(s)}
-                        >
-                          <span className="chip-dot" style={{ background: s.accentColor }} />
-                          {nickOf(s)}
-                        </button>
-                      ))}
+                      {orderedSkus.map((s) => {
+                        const want = planLines
+                          .filter((l) => l.skuId === s.id)
+                          .reduce((n, l) => n + l.boxes, 0)
+                        return (
+                          <button
+                            key={s.id}
+                            className={`chip ${skuId === s.id ? 'on' : ''}`}
+                            onClick={() => pickSku(s)}
+                          >
+                            <span className="chip-dot" style={{ background: s.accentColor }} />
+                            {nickOf(s)}
+                            {want > 0 && <em className="chip-sub">计划 {want} 箱</em>}
+                          </button>
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className="hint">这个收货方还没有建档的品项，先去「档案」加一个</div>
@@ -358,12 +653,14 @@ function overText(over: { x: number; z: number }) {
                           onClick={() => pickDate(d.prodDate)}
                         >
                           {fmtDate(d.prodDate)}
-                          <em className="chip-sub">{Math.floor(d.left / perBox)} 箱</em>
+                          <em className="chip-sub">
+                            {d.planned > 0 ? `计划 ${d.planned} · ` : ''}有货 {Math.floor(d.left / perBox)} 箱
+                          </em>
                         </button>
                       ))}
                     </div>
                   ) : (
-                    <div className="hint">这个品还没有库存，先去「库存」入库再发</div>
+                    <div className="hint">这个品既没定计划也没入库，先去「库存」入库再发</div>
                   ))}
               </div>
             </>
@@ -375,7 +672,11 @@ function overText(over: { x: number; z: number }) {
           {!sku && (
             <div className="pack-empty">
               选个品，箱子就码上来了
-              <span>品和日期都在上面，选完直接加减层数</span>
+              <span>
+                {planLines.length > 0
+                  ? '按计划挑品和日期，层数会自动配到还差的箱数'
+                  : '品和日期都在上面，选完直接加减层数'}
+              </span>
             </div>
           )}
 
@@ -389,9 +690,7 @@ function overText(over: { x: number; z: number }) {
                   <b className="num">{boxes}</b>
                   <i>箱</i>
                 </div>
-                <div className={`total-sub ${warn ? 'warn' : ''}`}>
-                  {warn || (prodDate ? `这天还能装 ${avail} 箱` : '还没选生产日期')}
-                </div>
+                <div className={`total-sub ${warn ? 'warn' : ''}`}>{warn || planHint}</div>
                 <div className={`total-note ${plan?.over ? 'warn' : ''}`}>
                   {plan?.note} · 隔层调头
                   {plan?.over ? ` · 一层 ${perLayer} 箱，比板 ${overText(plan.over)}` : ''}
@@ -484,6 +783,8 @@ export default function Load() {
   const [creating, setCreating] = useState(false)
   /** 非空表示正在装板；editId 有值是改已有的板，没有就是在装新的一块 */
   const [packing, setPacking] = useState<{ editId?: string } | null>(null)
+  /** 正在改这趟车的要货计划 */
+  const [planEditing, setPlanEditing] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   /** 刚发完车的单：单据已经不是草稿了，但 3D 要接着展示 */
   const [shippedPreview, setShippedPreview] = useState<Order | null>(null)
@@ -502,6 +803,29 @@ export default function Load() {
         .join('\n')
       alert(`库存不足，不能发车：\n${msg}\n\n请减少箱数，或先入库再发。`)
       return
+    }
+    // 跟建车时定的要货计划对一遍账，不一致就让现场再确认一次
+    const ps = planSummary(draft)
+    if (ps.planBoxes > 0) {
+      const diff: string[] = []
+      for (const l of ps.lines) {
+        if (l.left === 0) continue
+        const s = db.skus.find((x) => x.id === l.skuId)
+        diff.push(
+          `${s ? nickOf(s) : '品项已删除'} ${fmtDate(l.prodDate)} ${
+            l.left > 0 ? `还差 ${l.left} 箱` : `超装 ${-l.left} 箱`
+          }`,
+        )
+      }
+      for (const e of ps.extra) {
+        const s = db.skus.find((x) => x.id === e.skuId)
+        diff.push(`${s ? nickOf(s) : '品项已删除'} ${fmtDate(e.prodDate)} 计划外 ${e.boxes} 箱`)
+      }
+      if (
+        diff.length > 0 &&
+        !confirm(`装的货和要货计划不一致：\n${diff.slice(0, 5).join('\n')}\n\n仍按车上这些货发车？`)
+      )
+        return
     }
     shipOrder(draft.id)
     setShippedPreview({ ...draft, status: 'shipped' })
@@ -533,6 +857,10 @@ export default function Load() {
     )
   }
 
+  if (draft && planEditing) {
+    return <PlanEditPage order={draft} onCancel={() => setPlanEditing(false)} onSaved={() => setPlanEditing(false)} />
+  }
+
   if (!draft) {
     return (
       <>
@@ -548,7 +876,7 @@ export default function Load() {
               </div>
               <div className="es-title">今天要发哪一车？</div>
               <div className="es-body">
-                填收货地、选收货方，直接开装
+                填收货地、选收货方，再录这趟要发哪些货
                 <br />
                 一板一种商品、一个生产日期
               </div>
@@ -571,6 +899,7 @@ export default function Load() {
   }
 
   const customer = customerById(db, draft.customerId)
+  const ps = planSummary(draft)
 
   return (
     <>
@@ -607,6 +936,54 @@ export default function Load() {
             <div>
               <b>{fmt(sum.totalVolume, 2)}</b>
               <span>体积 m³</span>
+            </div>
+          </div>
+        )}
+
+        {ps.lines.length > 0 && (
+          <div className="card card-pad plan-card">
+            <div className="plan-card-head">
+              <span>本趟要货计划 · 共 {ps.planBoxes} 箱</span>
+              <button className="link-btn" onClick={() => setPlanEditing(true)}>
+                改计划
+              </button>
+            </div>
+            {ps.lines.map((l) => {
+              const sku = db.skus.find((s) => s.id === l.skuId)
+              const pct = l.boxes > 0 ? Math.min(100, Math.round((l.done / l.boxes) * 100)) : 0
+              const state = l.left > 0 ? 'todo' : l.left < 0 ? 'over' : 'done'
+              return (
+                <div className="plan-line" key={l.id}>
+                  <div className="plan-line-head">
+                    <b>{sku ? nickOf(sku) : '品项已删除'}</b>
+                    <em>{fmtDate(l.prodDate)}</em>
+                    <span className={state}>
+                      {l.left > 0 ? `还差 ${l.left} 箱` : l.left < 0 ? `超 ${-l.left} 箱` : '已装齐'}
+                    </span>
+                  </div>
+                  <div className="plan-bar">
+                    <i className={state} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="plan-line-sub">
+                    计划 {l.boxes} 箱 · 已装 {l.done} 箱
+                  </div>
+                </div>
+              )
+            })}
+            {ps.extra.length > 0 && (
+              <div className="plan-extra">
+                计划外还装了{' '}
+                {ps.extra
+                  .map((e) => {
+                    const s = db.skus.find((x) => x.id === e.skuId)
+                    return `${s ? nickOf(s) : '?'} ${fmtDate(e.prodDate)} ${e.boxes} 箱`
+                  })
+                  .join('、')}
+              </div>
+            )}
+            <div className="plan-card-foot">
+              合计已装 {ps.doneBoxes} / {ps.planBoxes} 箱
+              {ps.leftBoxes > 0 ? `，还差 ${ps.leftBoxes} 箱` : ps.overBoxes > 0 ? `，超装 ${ps.overBoxes} 箱` : '，已装齐'}
             </div>
           </div>
         )}
