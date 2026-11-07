@@ -169,12 +169,9 @@ export const KLH_STOCK_DAYS = [4, 2]
 export const KLH_STOCK_BOXES = 100
 
 /** 数据版本：升级时靠它判断要不要补示例数据 */
-const DATA_VERSION = 3
+const DATA_VERSION = 4
 
 function seed(): DB {
-  const now = Date.now()
-  const day = daysAgo
-
   const customers: Customer[] = [
     { id: CUSTOMER_HM, name: '盒马', short: '盒马' },
     { id: CUSTOMER_KLH, name: '快乐猴', short: '快乐猴' },
@@ -324,27 +321,7 @@ function seed(): DB {
   const batches: Batch[] = []
   const moves: Move[] = []
 
-  const stock = (sku: Sku, prodDate: string, qty: number) => {
-    const b: Batch = { id: uid(), skuId: sku.id, batchNo: prodDate.replace(/-/g, ''), qty, prodDate, createdAt: now }
-    batches.push(b)
-    moves.push({ id: uid(), at: now, type: 'in', skuId: sku.id, batchId: b.id, qty, ref: '期初', note: '示例入库' })
-  }
-
-  const byId = (id: string) => skus.find((s) => s.id === id)!
-
-  /** 盒马示例库存：每个品、每个生产日期都是 200 箱，方便按整板整板地试 */
-  for (const s of skus.filter((x) => x.customerId === CUSTOMER_HM)) {
-    for (const n of HM_STOCK_DAYS) stock(s, day(n), HM_STOCK_BOXES * (s.perBox || 1))
-  }
-
-  // 快乐猴：每个品、每个日期 100 箱
-  for (const s of skus.filter((x) => x.customerId === CUSTOMER_KLH)) {
-    for (const n of KLH_STOCK_DAYS) stock(s, day(n), KLH_STOCK_BOXES * (s.perBox || 1))
-  }
-
-  // 菜洋洋留少量库存，方便试「库存不足」的拦截
-  stock(byId('sku-meat-cyy'), day(3), 80)
-
+  // 不再预置示例库存：首次打开就是干净的空库存，由用户自己在「库存」页录入。
   return {
     customers,
     skus,
@@ -511,6 +488,24 @@ function migrate(raw: Record<string, unknown>): DB {
     }
     for (const sku of skus.filter((s) => s.customerId === CUSTOMER_KLH)) {
       for (const back of KLH_STOCK_DAYS) topUp(sku, daysAgo(back), KLH_STOCK_BOXES, '快乐猴示例库存补齐')
+    }
+  }
+
+  // v4：去掉所有示例库存（示例入库 / 示例补齐 的流水和它们对应的批次），
+  // 首次打开变成干净的空库存，由用户在「库存」页录入真实数据。
+  if (version < 4) {
+    const demoMoveIds = new Set(moves.filter((m) => (m.note || '').includes('示例') || m.ref === '示例补齐').map((m) => m.id))
+    // 找出只由示例流水组成的批次，一并清掉
+    const demoBatchIds = new Set<string>()
+    for (const b of batches) {
+      const bs = moves.filter((m) => m.batchId === b.id && !m.voided)
+      if (bs.length > 0 && bs.every((m) => demoMoveIds.has(m.id))) demoBatchIds.add(b.id)
+    }
+    for (let i = moves.length - 1; i >= 0; i--) {
+      if (demoMoveIds.has(moves[i].id)) moves.splice(i, 1)
+    }
+    for (let i = batches.length - 1; i >= 0; i--) {
+      if (demoBatchIds.has(batches[i].id)) batches.splice(i, 1)
     }
   }
 
