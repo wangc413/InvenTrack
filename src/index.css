@@ -2315,6 +2315,15 @@ textarea.input {
   flex: 0 0 auto;
 }
 
+/* 内联展开的选择区：品项 / 日期 / 收货方都改成文档流内展开一排 chip，
+   点一下就在下方铺开，把后续内容自然往下推，绝不浮层覆盖、不重叠 */
+.plan-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 2px 2px;
+}
+
 /* 品项弹层：直接从胶囊按钮处向下展开，覆盖后续行，不占整屏 */
 .plan-pick-pop {
   position: absolute;

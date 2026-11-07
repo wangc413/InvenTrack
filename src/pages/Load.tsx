@@ -150,26 +150,26 @@ function PlanEditor({
                 <b>{sku ? nickOf(sku) : '选品'}</b>
                 <i className="caret" />
               </button>
-              {skuOpen && (
-                <div className="plan-pick-pop">
-                  {skus.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={`plan-pick-item ${r.skuId === s.id ? 'on' : ''}`}
-                      onClick={() => {
-                        set(r.key, { skuId: s.id, prodDate: '' })
-                        close()
-                      }}
-                    >
-                      <span className="dot" style={{ background: s.accentColor }} />
-                      <b>{nickOf(s)}</b>
-                      {r.skuId === s.id && <Icon name="check" size={16} />}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
+            {skuOpen && (
+              <div className="plan-inline">
+                {skus.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={`chip ${r.skuId === s.id ? 'on' : ''}`}
+                    onClick={() => {
+                      set(r.key, { skuId: s.id, prodDate: '' })
+                      close()
+                    }}
+                  >
+                    <span className="chip-dot" style={{ background: s.accentColor }} />
+                    {nickOf(s)}
+                    {r.skuId === s.id && <Icon name="check" size={16} />}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="plan-row-fields">
               <div className="plan-date-wrap">
@@ -182,29 +182,6 @@ function PlanEditor({
                   <b>{r.prodDate ? `${fmtDate(r.prodDate)} · ${dateLeft} 箱` : sku ? '选日期' : '先选品'}</b>
                   <i className="caret" />
                 </button>
-                {dateOpen && (
-                  <div className="plan-pick-pop">
-                    {inStock.length > 0 ? (
-                      inStock.map((d) => (
-                        <button
-                          key={d.prodDate}
-                          type="button"
-                          className={`plan-pick-item ${r.prodDate === d.prodDate ? 'on' : ''}`}
-                          onClick={() => {
-                            set(r.key, { prodDate: d.prodDate })
-                            close()
-                          }}
-                        >
-                          <b>{fmtDate(d.prodDate)}</b>
-                          <em className="plan-pick-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
-                          {r.prodDate === d.prodDate && <Icon name="check" size={16} />}
-                        </button>
-                      ))
-                    ) : (
-                      <div className="hint">这个品还没入库，先去「库存」页录入</div>
-                    )}
-                  </div>
-                )}
               </div>
               <div className="plan-boxes">
                 <input
@@ -220,6 +197,29 @@ function PlanEditor({
                 <em>箱</em>
               </div>
             </div>
+            {dateOpen && (
+              <div className="plan-inline">
+                {inStock.length > 0 ? (
+                  inStock.map((d) => (
+                    <button
+                      key={d.prodDate}
+                      type="button"
+                      className={`chip ${r.prodDate === d.prodDate ? 'on' : ''}`}
+                      onClick={() => {
+                        set(r.key, { prodDate: d.prodDate })
+                        close()
+                      }}
+                    >
+                      {fmtDate(d.prodDate)}
+                      <em className="chip-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
+                      {r.prodDate === d.prodDate && <Icon name="check" size={16} />}
+                    </button>
+                  ))
+                ) : (
+                  <div className="hint">这个品还没入库，先去「库存」页录入</div>
+                )}
+              </div>
+            )}
 
             {over && <div className="plan-err">超库存了，这天只剩 {dateLeft} 箱</div>}
           </div>
@@ -234,8 +234,6 @@ function PlanEditor({
           填好 <b>{valid}</b> 行 · 合计 <b>{total}</b> 箱
         </div>
       )}
-
-      {menu && <div className="picker-mask" onClick={close} />}
     </div>
   )
 }
@@ -344,34 +342,32 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
         </div>
 
         <div className="card card-pad" style={{ marginTop: 8, overflow: 'visible' }}>
-          <div className="plan-customer-wrap">
-            <button
-              type="button"
-              className={`plan-pick plan-customer-pick ${customerId ? '' : 'placeholder'}`}
-              onClick={() => setCustomerOpen((v) => !v)}
-            >
-              <b>{customerId ? (db.customers.find((c) => c.id === customerId)?.name ?? '收货方') : '收货方'}</b>
-              <i className="caret" />
-            </button>
-            {customerOpen && (
-              <div className="plan-pick-pop">
-                {db.customers.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={`plan-pick-item ${customerId === c.id ? 'on' : ''}`}
-                    onClick={() => {
-                      pickCustomer(c.id)
-                      setCustomerOpen(false)
-                    }}
-                  >
-                    <b>{c.name}</b>
-                    {customerId === c.id && <Icon name="check" size={16} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            className={`plan-pick plan-customer-pick ${customerId ? '' : 'placeholder'}`}
+            onClick={() => setCustomerOpen((v) => !v)}
+          >
+            <b>{customerId ? (db.customers.find((c) => c.id === customerId)?.name ?? '收货方') : '收货方'}</b>
+            <i className="caret" />
+          </button>
+          {customerOpen && (
+            <div className="plan-inline">
+              {db.customers.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`chip ${customerId === c.id ? 'on' : ''}`}
+                  onClick={() => {
+                    pickCustomer(c.id)
+                    setCustomerOpen(false)
+                  }}
+                >
+                  {c.name}
+                  {customerId === c.id && <Icon name="check" size={16} />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {customerId && (
@@ -382,8 +378,6 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
 
         <div style={{ height: 12 }} />
       </div>
-
-      {customerOpen && <div className="picker-mask" onClick={() => setCustomerOpen(false)} />}
 
       <div className="dock">
         <button className="btn primary" onClick={create} disabled={!destination.trim() || !customerId}>
