@@ -17,6 +17,7 @@ import {
   addPallet,
   createOrder,
   customerById,
+  getState,
   loadedBoxes,
   nickOf,
   normalizePlan,
@@ -29,6 +30,7 @@ import {
   shortages,
   skusOfCustomer,
   stockByDate,
+  stockOfDate,
   updateOrder,
   updatePallet,
   useDB,
@@ -96,8 +98,8 @@ const linesToRows = (lines: PlanLine[]): PlanRow[] =>
 
 /**
  * 一行 = 一个品 + 一个生产日期 + 多少箱。
- * 同品不同日期就写两行（11-02 肉包 150 箱、11-04 肉包 288 箱），复制按钮专门干这个。
- * 日期用原生 date 控件，另外把「这个品有货的日期」列成小 chip，点一下就填。
+ * 同品不同日期就写两行（11-02 肉包 150 箱、11-04 肉包 288 箱）。
+ * 品项和日期都用「胶囊点开弹层」这一套交互，不搞粗糙的原生下拉。
  */
 function PlanEditor({
   db,
@@ -115,60 +117,98 @@ function PlanEditor({
     onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
   const total = rows.reduce((s, r) => s + (Number(r.boxes) || 0), 0)
   const valid = rows.filter((r) => r.skuId && r.prodDate && Number(r.boxes) > 0).length
+  /** 当前点开的弹层：{ key, type } 只跟一行、一种（品/日期）联动 */
+  const [menu, setMenu] = useState<{ key: string; type: 'sku' | 'date' } | null>(null)
+
+  const close = () => setMenu(null)
+  const open = (key: string, type: 'sku' | 'date') =>
+    setMenu((m) => (m && m.key === key && m.type === type ? null : { key, type }))
 
   return (
     <div className="plan-editor">
       {rows.map((r, i) => {
         const sku = skus.find((s) => s.id === r.skuId)
-        const inStock = r.skuId ? stockByDate(db, r.skuId).slice(0, 4) : []
+        /** 这个品有货的生产日期（从新到旧），每个日期还剩多少件 */
+        const inStock = r.skuId ? stockByDate(db, r.skuId) : []
+        /** 当前选中的日期还剩多少箱 */
+        const dateLeft = sku && r.prodDate ? Math.floor(stockOfDate(db, r.skuId, r.prodDate) / (sku.perBox || 1)) : 0
+        const boxes = Number(r.boxes) || 0
+        /** 箱数超过这个日期的库存了 */
+        const over = r.skuId && r.prodDate && boxes > 0 && boxes > dateLeft
+        const skuOpen = menu?.key === r.key && menu.type === 'sku'
+        const dateOpen = menu?.key === r.key && menu.type === 'date'
         return (
           <div className="plan-row" key={r.key}>
             <div className="plan-row-head">
               <span className="plan-idx">{i + 1}</span>
-              <select
-                className="plan-select"
-                value={r.skuId}
-                onChange={(e) => set(r.key, { skuId: e.target.value })}
-                aria-label="品项"
-              >
-                <option value="">选品…</option>
-                {skus.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {nickOf(s)}
-                  </option>
-                ))}
-              </select>
               <button
                 type="button"
-                className="plan-mini"
-                onClick={() => {
-                  const copy: PlanRow = { ...r, key: rowKey(), prodDate: '', boxes: '' }
-                  onChange([...rows.slice(0, i + 1), copy, ...rows.slice(i + 1)])
-                }}
+                className={`plan-pick ${sku ? '' : 'placeholder'}`}
+                onClick={() => open(r.key, 'sku')}
               >
-                复制
+                {sku && <span className="dot" style={{ background: sku.accentColor }} />}
+                <b>{sku ? nickOf(sku) : '选品'}</b>
+                <i className="caret" />
               </button>
-              <button
-                type="button"
-                className="plan-mini danger"
-                aria-label="删掉这一行"
-                onClick={() => onChange(rows.filter((x) => x.key !== r.key))}
-              >
-                <Icon name="trash" size={14} />
-              </button>
+              {skuOpen && (
+                <div className="plan-pick-pop">
+                  {skus.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`plan-pick-item ${r.skuId === s.id ? 'on' : ''}`}
+                      onClick={() => {
+                        set(r.key, { skuId: s.id, prodDate: '' })
+                        close()
+                      }}
+                    >
+                      <span className="dot" style={{ background: s.accentColor }} />
+                      <b>{nickOf(s)}</b>
+                      {r.skuId === s.id && <Icon name="check" size={16} />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="plan-row-fields">
-              <input
-                className="input plan-date"
-                type="date"
-                value={r.prodDate}
-                onChange={(e) => set(r.key, { prodDate: e.target.value })}
-                aria-label="生产日期"
-              />
+              <div className="plan-date-wrap">
+                <button
+                  type="button"
+                  className={`plan-pick plan-date-pick ${r.prodDate ? '' : 'placeholder'}`}
+                  disabled={!sku}
+                  onClick={() => open(r.key, 'date')}
+                >
+                  <b>{r.prodDate ? `${fmtDate(r.prodDate)} · ${dateLeft} 箱` : sku ? '选日期' : '先选品'}</b>
+                  <i className="caret" />
+                </button>
+                {dateOpen && (
+                  <div className="plan-pick-pop">
+                    {inStock.length > 0 ? (
+                      inStock.map((d) => (
+                        <button
+                          key={d.prodDate}
+                          type="button"
+                          className={`plan-pick-item ${r.prodDate === d.prodDate ? 'on' : ''}`}
+                          onClick={() => {
+                            set(r.key, { prodDate: d.prodDate })
+                            close()
+                          }}
+                        >
+                          <b>{fmtDate(d.prodDate)}</b>
+                          <em className="plan-pick-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
+                          {r.prodDate === d.prodDate && <Icon name="check" size={16} />}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="hint">这个品还没入库，先去「库存」页录入</div>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="plan-boxes">
                 <input
-                  className="input"
+                  className={`input ${over ? 'err' : ''}`}
                   type="number"
                   inputMode="numeric"
                   min={1}
@@ -181,34 +221,21 @@ function PlanEditor({
               </div>
             </div>
 
-            {inStock.length > 0 && (
-              <div className="plan-quick">
-                <span>有货</span>
-                {inStock.map((d) => (
-                  <button
-                    key={d.prodDate}
-                    type="button"
-                    className={`chip tiny ${r.prodDate === d.prodDate ? 'on' : ''}`}
-                    onClick={() => set(r.key, { prodDate: d.prodDate })}
-                  >
-                    {fmtDate(d.prodDate)}
-                    <em className="chip-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
-                  </button>
-                ))}
-              </div>
-            )}
+            {over && <div className="plan-err">超库存了，这天只剩 {dateLeft} 箱</div>}
           </div>
         )
       })}
 
       <button type="button" className="btn plan-add" onClick={() => onChange([...rows, emptyRow()])}>
-        + 再加一行
+        + 添加其他品类
       </button>
       {rows.length > 0 && (
         <div className="plan-total">
           填好 <b>{valid}</b> 行 · 合计 <b>{total}</b> 箱
         </div>
       )}
+
+      {menu && <div className="picker-mask" onClick={close} />}
     </div>
   )
 }
@@ -253,6 +280,8 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
   const [destination, setDestination] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [planRows, setPlanRows] = useState<PlanRow[]>([emptyRow()])
+  /** 收货方下拉弹层开关 */
+  const [customerOpen, setCustomerOpen] = useState(false)
 
   /** 换收货方时，把不属于新收货方的品清掉，免得串货 */
   const pickCustomer = (id: string) => {
@@ -268,6 +297,14 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     const filled = planRows.filter((r) => r.skuId || r.prodDate || r.boxes)
     if (filled.some((r) => !r.skuId || !r.prodDate || !(Number(r.boxes) > 0)))
       return toast('要货计划有没填全的行：品、日期、箱数都要填')
+    // 箱数不能超过这个品这个日期的库存
+    for (const r of filled) {
+      const sku = db.skus.find((s) => s.id === r.skuId)
+      if (!sku) continue
+      const left = Math.floor(stockOfDate(db, r.skuId, r.prodDate) / (sku.perBox || 1))
+      if (Number(r.boxes) > left)
+        return toast(`${nickOf(sku)} ${fmtDate(r.prodDate)} 只剩 ${left} 箱，箱数填超了`)
+    }
     rememberDestination(dest)
     const id = createOrder({ destination: dest, customerId, plan: rowsToLines(filled) })
     onCreated(id)
@@ -281,16 +318,14 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
             <Icon name="back" size={22} />
           </button>
           <h1>新建车次</h1>
-          <p className="sub">送到哪、发给谁、这趟发哪些货，一次填好</p>
         </header>
 
         <div className="card card-pad">
-          <label className="field-label">1 · 收货地</label>
           <input
             className="input"
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
-            placeholder="门店名或详细地址"
+            placeholder="收货地（门店名或地址）"
             autoFocus
           />
           {recent.length > 0 && (
@@ -308,38 +343,47 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
           )}
         </div>
 
-        <div className="card card-pad" style={{ marginTop: 8 }}>
-          <label className="field-label">2 · 收货方</label>
-          <div className="chips">
-            {db.customers.map((c) => (
-              <button
-                key={c.id}
-                className={`chip ${customerId === c.id ? 'on' : ''}`}
-                onClick={() => pickCustomer(c.id)}
-              >
-                {c.name}
-              </button>
-            ))}
+        <div className="card card-pad" style={{ marginTop: 8, overflow: 'visible' }}>
+          <div className="plan-customer-wrap">
+            <button
+              type="button"
+              className={`plan-pick plan-customer-pick ${customerId ? '' : 'placeholder'}`}
+              onClick={() => setCustomerOpen((v) => !v)}
+            >
+              <b>{customerId ? (db.customers.find((c) => c.id === customerId)?.name ?? '收货方') : '收货方'}</b>
+              <i className="caret" />
+            </button>
+            {customerOpen && (
+              <div className="plan-pick-pop">
+                {db.customers.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`plan-pick-item ${customerId === c.id ? 'on' : ''}`}
+                    onClick={() => {
+                      pickCustomer(c.id)
+                      setCustomerOpen(false)
+                    }}
+                  >
+                    <b>{c.name}</b>
+                    {customerId === c.id && <Icon name="check" size={16} />}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="card card-pad" style={{ marginTop: 8 }}>
-          <label className="field-label">3 · 这趟要发什么</label>
-          <div className="hint" style={{ margin: '0 2px 10px' }}>
-            一个品 + 一个生产日期 + 箱数写一行；同品不同日期就写两行
-          </div>
-          {customerId ? (
+        {customerId && (
+          <div className="card card-pad" style={{ marginTop: 8, overflow: 'visible' }}>
             <PlanEditor db={db} customerId={customerId} rows={planRows} onChange={setPlanRows} />
-          ) : (
-            <div className="hint">先选收货方，再挑这个收货方的品</div>
-          )}
-          <div className="hint" style={{ margin: '12px 2px 0' }}>
-            定好计划后，装板会按日期和箱数一板一板带出来，发车前自动对账。
           </div>
-        </div>
+        )}
 
         <div style={{ height: 12 }} />
       </div>
+
+      {customerOpen && <div className="picker-mask" onClick={() => setCustomerOpen(false)} />}
 
       <div className="dock">
         <button className="btn primary" onClick={create} disabled={!destination.trim() || !customerId}>
@@ -394,7 +438,17 @@ function PlanEditPage({ order, onCancel, onSaved }: { order: Order; onCancel: ()
  * 一块板一屏：3D 占满，品 / 日期收成两个下拉，层数和顶层直接在 3D 上按 + / −。
  * 点「装上」把这块定下来，清空成下一块空板，接着装。
  */
-function PackingBoard({ order, editing, onBack }: { order: Order; editing: Pallet | null; onBack: () => void }) {
+function PackingBoard({
+  order,
+  editing,
+  onBack,
+  onDone,
+}: {
+  order: Order
+  editing: Pallet | null
+  onBack: () => void
+  onDone: () => void
+}) {
   const db = useDB()
   const skus = skusOfCustomer(db, order.customerId)
   const planLines = order.plan ?? []
@@ -411,6 +465,8 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const [topCount, setTopCount] = useState(editing?.topCount ?? DEFAULT_PER_LAYER)
   /** 当前展开的是哪个下拉：品 / 生产日期 */
   const [menu, setMenu] = useState<'sku' | 'date' | null>(null)
+  /** 是否在手动选品/换品。连续装板时 false，顶部只显示「正在装」信息条，不打扰 */
+  const [picking, setPicking] = useState(false)
 
   const sku = skus.find((s) => s.id === skuId) ?? null
   const stockDates = sku ? stockByDate(db, sku.id) : []
@@ -427,6 +483,7 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
           prodDate,
           left: stockDates.find((d) => d.prodDate === prodDate)?.left ?? 0,
           planned: plannedBoxes(order, sku.id, prodDate),
+          done: loadedBoxes(order, sku.id, prodDate, editing?.id),
         }))
     : []
   const picked = dates.find((d) => d.prodDate === prodDate)
@@ -476,7 +533,8 @@ function overText(over: { x: number; z: number }) {
     )
     const p = layerPlan(s)
     if (target <= 0) {
-      setLayers(maxLayers(s))
+      // 计划已装齐，不再自动配满 —— 配一层让用户看清是「超计划」状态，由按钮禁用兜底
+      setLayers(1)
       setTopCount(p.perLayer)
       return
     }
@@ -506,6 +564,7 @@ function overText(over: { x: number; z: number }) {
     setProdDate(d)
     if (!editing && sku) fitPlan(sku, d)
     setMenu(null)
+    setPicking(false)
   }
 
   const putOn = () => {
@@ -513,6 +572,13 @@ function overText(over: { x: number; z: number }) {
     if (!prodDate) return toast('这个品还没有库存')
     if (boxes <= 0) return toast('这一板还没码上箱子')
     if (over > 0) return toast(`库存不足：${fmtDate(prodDate)} 还能装 ${avail} 箱`)
+
+    // 有计划时，超了计划箱数就不让装（计划外临时加货不受这条限制）
+    const planned = plannedBoxes(order, skuId, prodDate)
+    const done = loadedBoxes(order, skuId, prodDate, editing?.id)
+    if (planned > 0 && done + boxes > planned) {
+      return toast(`超出计划：${nickOf(sku)} ${fmtDate(prodDate)} 计划 ${planned} 箱，已装 ${done} 箱，最多还能装 ${Math.max(0, planned - done)} 箱`)
+    }
 
     const payload = { skuId, prodDate, layers, perLayer, topCount: top }
     if (editing) {
@@ -532,20 +598,33 @@ function overText(over: { x: number; z: number }) {
       planLines.find((l) => l.skuId === skuId && l.prodDate === prodDate && leftOf(l) > 0) ??
       planLines.find((l) => leftOf(l) > 0)
     const nextSku = next ? skus.find((s) => s.id === next.skuId) : null
+    // 手上这条（同品同日期）还没装完 → 无缝继续，不换品
+    const sameBatch = planLines.some(
+      (l) => l.skuId === skuId && l.prodDate === prodDate && leftOf(l) > 0,
+    )
     if (next && nextSku) {
       setSkuId(nextSku.id)
       setProdDate(next.prodDate)
       fitPlan(nextSku, next.prodDate, doneAfter(nextSku.id, next.prodDate))
-      toast(`${palletLabel} 已上车 · 接着 ${nickOf(nextSku)} ${fmtDate(next.prodDate)}，还差 ${leftOf(next)} 箱`)
+      setPicking(false)
+      if (sameBatch) {
+        // 还是这个品这个日期，接着码下一板，别打断
+        toast(`${palletLabel} 已上车 · 接着装 ${nickOf(nextSku)} ${fmtDate(next.prodDate)}，还差 ${leftOf(next)} 箱`)
+      } else {
+        // 这个批次装完了，跳到下一个品/日期
+        toast(`这个批次装完啦，换品 → ${nickOf(nextSku)} ${fmtDate(next.prodDate)}，还差 ${leftOf(next)} 箱`)
+      }
     } else {
-      // 没有待装计划了，3D 回到一块空托盘
+      // 有计划且全部装齐 → 直接跳发车界面
+      if (planLines.length > 0) {
+        onDone()
+        return
+      }
+      // 没有待装计划了（纯临时装货），3D 回到一块空托盘接着装
       setSkuId('')
       setProdDate('')
-      toast(
-        planLines.length > 0
-          ? `${palletLabel} 已上车 · 计划已装齐，可以发车了`
-          : `${palletLabel} 已上车，接着装 ${nextLabel}`,
-      )
+      setPicking(false)
+      toast(`${palletLabel} 已上车，接着装 ${nextLabel}`)
     }
   }
 
@@ -563,12 +642,16 @@ function overText(over: { x: number; z: number }) {
   /** 有计划时，HUD 上那行小字改成「这一条还差多少」，装一板就能对一次账 */
   const planBoxesHere = sku && prodDate ? plannedBoxes(order, sku.id, prodDate) : 0
   const planDoneHere = sku && prodDate ? loadedBoxes(order, sku.id, prodDate, editing?.id) : 0
-  const planLeftAfter = planBoxesHere > 0 ? Math.max(0, planBoxesHere - planDoneHere - boxes) : 0
+  /** 这一板装下去，会不会超过这个品+日期的计划箱数 */
+  const overPlan = planBoxesHere > 0 && planDoneHere + boxes > planBoxesHere
+  const planLeftAfter = planBoxesHere > 0 ? planBoxesHere - planDoneHere - boxes : 0
   const planHint =
     planBoxesHere > 0
-      ? planLeftAfter > 0
-        ? `还差 ${planLeftAfter} 箱 · 计划 ${planBoxesHere} 箱`
-        : `已装齐 · 计划 ${planBoxesHere} 箱`
+      ? overPlan
+        ? `超计划 ${planDoneHere + boxes - planBoxesHere} 箱 · 计划 ${planBoxesHere} 箱`
+        : planLeftAfter > 0
+          ? `还差 ${planLeftAfter} 箱 · 计划 ${planBoxesHere} 箱`
+          : `已装齐 · 计划 ${planBoxesHere} 箱`
       : prodDate
         ? `这天还能装 ${avail} 箱`
         : '还没选生产日期'
@@ -590,7 +673,28 @@ function overText(over: { x: number; z: number }) {
           </p>
         </header>
 
-        <div className="pack-pick">
+        {sku && !picking ? (
+          <div className="pack-current">
+            <span className="cur-dot" style={{ background: sku.accentColor }} />
+            <div className="cur-info">
+              <b>
+                {nickOf(sku)} · {prodDate ? fmtDate(prodDate) : '—'}
+              </b>
+              <em>{planHint}</em>
+            </div>
+            <button
+              type="button"
+              className="cur-switch"
+              onClick={() => {
+                setPicking(true)
+                setMenu('sku')
+              }}
+            >
+              换品
+            </button>
+          </div>
+        ) : (
+          <div className="pack-pick">
           <button
             className={`picker ${menu === 'sku' ? 'on' : ''}`}
             onClick={() => setMenu(menu === 'sku' ? null : 'sku')}
@@ -627,6 +731,10 @@ function overText(over: { x: number; z: number }) {
                         const want = planLines
                           .filter((l) => l.skuId === s.id)
                           .reduce((n, l) => n + l.boxes, 0)
+                        const done = ps.lines
+                          .filter((l) => l.skuId === s.id)
+                          .reduce((n, l) => n + Math.min(l.done, l.boxes), 0)
+                        const full = want > 0 && done >= want
                         return (
                           <button
                             key={s.id}
@@ -635,7 +743,12 @@ function overText(over: { x: number; z: number }) {
                           >
                             <span className="chip-dot" style={{ background: s.accentColor }} />
                             {nickOf(s)}
-                            {want > 0 && <em className="chip-sub">计划 {want} 箱</em>}
+                            {want > 0 && (
+                              <>
+                                <span className={`plan-dot ${full ? 'full' : ''}`} />
+                                <em className={`chip-sub plan ${full ? 'full' : ''}`}>计划 {want} 箱</em>
+                              </>
+                            )}
                           </button>
                         )
                       })}
@@ -653,8 +766,16 @@ function overText(over: { x: number; z: number }) {
                           onClick={() => pickDate(d.prodDate)}
                         >
                           {fmtDate(d.prodDate)}
+                          {d.planned > 0 && (
+                            <span className={`plan-dot ${d.done >= d.planned ? 'full' : ''}`} />
+                          )}
                           <em className="chip-sub">
-                            {d.planned > 0 ? `计划 ${d.planned} · ` : ''}有货 {Math.floor(d.left / perBox)} 箱
+                            {d.planned > 0 && (
+                              <b className={`plan ${d.done >= d.planned ? 'full' : ''}`}>
+                                计划 {d.planned}
+                              </b>
+                            )}
+                            {d.planned > 0 ? ' · ' : ''}有货 {Math.floor(d.left / perBox)} 箱
                           </em>
                         </button>
                       ))}
@@ -665,18 +786,27 @@ function overText(over: { x: number; z: number }) {
               </div>
             </>
           )}
-        </div>
+          </div>
+        )}
 
         <div className={`pack-stage ${sku ? 'with-ops' : ''}`}>
           <Box3D pallets={spec} emptyPallet />
           {!sku && (
             <div className="pack-empty">
-              选个品，箱子就码上来了
-              <span>
-                {planLines.length > 0
-                  ? '按计划挑品和日期，层数会自动配到还差的箱数'
-                  : '品和日期都在上面，选完直接加减层数'}
-              </span>
+              <button
+                type="button"
+                className="pack-add"
+                aria-label="添加品项"
+                onClick={() => {
+                  setPicking(true)
+                  setMenu('sku')
+                }}
+              >
+                <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <span className="pack-empty-tip">选个品，箱子就码上来了</span>
             </div>
           )}
 
@@ -690,7 +820,7 @@ function overText(over: { x: number; z: number }) {
                   <b className="num">{boxes}</b>
                   <i>箱</i>
                 </div>
-                <div className={`total-sub ${warn ? 'warn' : ''}`}>{warn || planHint}</div>
+                <div className={`total-sub ${warn || overPlan ? 'warn' : ''}`}>{warn || planHint}</div>
                 <div className={`total-note ${plan?.over ? 'warn' : ''}`}>
                   {plan?.note} · 隔层调头
                   {plan?.over ? ` · 一层 ${perLayer} 箱，比板 ${overText(plan.over)}` : ''}
@@ -705,7 +835,18 @@ function overText(over: { x: number; z: number }) {
                 </div>
                 <div className="step-chip">
                   <span className="lab">顶层</span>
-                  <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
+                  <Stepper
+                    value={top}
+                    min={1}
+                    max={perLayer}
+                    onChange={setTopCount}
+                    onMinus={() => {
+                      if (layers > 1) {
+                        setLayers(layers - 1)
+                        setTopCount(perLayer)
+                      }
+                    }}
+                  />
                 </div>
               </div>
             </div>
@@ -714,7 +855,7 @@ function overText(over: { x: number; z: number }) {
       </div>
 
       <div className="dock">
-        <button className="btn primary" onClick={putOn} disabled={!sku || boxes <= 0 || over > 0}>
+        <button className="btn primary" onClick={putOn} disabled={!sku || boxes <= 0 || over > 0 || overPlan}>
           {editing ? `保存 ${palletLabel}` : '下一板'}
         </button>
       </div>
@@ -793,9 +934,11 @@ export default function Load() {
   const editingPallet = packing?.editId ? (draft?.pallets.find((p) => p.id === packing.editId) ?? null) : null
 
   const confirmShip = () => {
-    if (!draft) return
-    if (draft.pallets.length === 0) return toast('车上还没有货')
-    const short = shortages(db, draft)
+    // 从最新 state 重取草稿：刚 addPallet 装上的板可能还没反映到闭包里的 draft
+    const latest = getState().orders.find((o) => o.status === 'draft') ?? draft
+    if (!latest) return
+    if (latest.pallets.length === 0) return toast('车上还没有货')
+    const short = shortages(db, latest)
     if (short.length > 0) {
       const msg = short
         .slice(0, 3)
@@ -805,7 +948,7 @@ export default function Load() {
       return
     }
     // 跟建车时定的要货计划对一遍账，不一致就让现场再确认一次
-    const ps = planSummary(draft)
+    const ps = planSummary(latest)
     if (ps.planBoxes > 0) {
       const diff: string[] = []
       for (const l of ps.lines) {
@@ -827,8 +970,8 @@ export default function Load() {
       )
         return
     }
-    shipOrder(draft.id)
-    setShippedPreview({ ...draft, status: 'shipped' })
+    shipOrder(latest.id)
+    setShippedPreview({ ...latest, status: 'shipped' })
     toast('已发车')
     setViewerOpen(true)
   }
@@ -853,6 +996,10 @@ export default function Load() {
         order={draft}
         editing={editingPallet}
         onBack={() => setPacking(null)}
+        onDone={() => {
+          setPacking(null)
+          confirmShip()
+        }}
       />
     )
   }

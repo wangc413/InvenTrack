@@ -1800,6 +1800,63 @@ textarea.input {
   padding: 0 12px 8px;
 }
 
+/* 连续装板时的「正在装」信息条：品 + 日期 + 还差多少，点「换品」才展开选择器 */
+.pack-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--fill);
+}
+
+.cur-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.cur-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cur-info b {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cur-info em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cur-switch {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--bg-elevated);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .picker {
   flex: 0 0 auto;
   min-width: 0;
@@ -1908,7 +1965,7 @@ textarea.input {
   inset: 0 0 104px 0;
 }
 
-/* 还没选品时的一句话，放大放正中 */
+/* 还没选品时：一个大加号按钮，点它直接打开选品窗口 */
 .pack-empty {
   position: absolute;
   left: 0;
@@ -1927,10 +1984,29 @@ textarea.input {
   pointer-events: none;
 }
 
-.pack-empty span {
-  font-size: 12.5px;
-  font-weight: 400;
-  letter-spacing: 0;
+.pack-add {
+  width: 88px;
+  height: 88px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.pack-add:active {
+  transform: scale(0.92);
+}
+
+.pack-empty-tip {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
   color: var(--sub);
 }
 
@@ -2089,6 +2165,66 @@ textarea.input {
   flex: 0 0 auto;
 }
 
+/* 计划内的小绿点：装板选品/选日期时，一眼看出哪些是计划要发的 */
+.plan-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 2.5px var(--ok-soft);
+}
+
+.chip.on .plan-dot {
+  background: #6ee7a0;
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.22);
+}
+
+/* 这个批次（品+日期）已经装齐了：绿点转红，提醒别再选它 */
+.plan-dot.full {
+  background: var(--danger);
+  box-shadow: 0 0 0 2.5px var(--danger-soft);
+}
+
+.chip.on .plan-dot.full {
+  background: #ff7d70;
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.22);
+}
+
+/* 计划内的品/日期，把「计划 N 箱」文字染绿，和绿点呼应 */
+.chip .chip-sub.plan {
+  color: var(--ok);
+}
+
+.chip .chip-sub.plan.full {
+  color: var(--danger);
+}
+
+.chip.on .chip-sub.plan {
+  color: #d3f7e0;
+}
+
+.chip.on .chip-sub.plan.full {
+  color: #ffd9d4;
+}
+
+.chip em b.plan {
+  font-weight: 500;
+  color: var(--ok);
+}
+
+.chip em b.plan.full {
+  color: var(--danger);
+}
+
+.chip.on em b.plan {
+  color: #d3f7e0;
+}
+
+.chip.on em b.plan.full {
+  color: #ffd9d4;
+}
+
 .stepper button:disabled {
   color: var(--line-strong, rgba(60, 60, 67, 0.18));
   pointer-events: none;
@@ -2112,17 +2248,18 @@ textarea.input {
 .plan-row-head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  position: relative;
 }
 
 .plan-idx {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--primary-soft);
   color: var(--sub);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   display: flex;
@@ -2130,61 +2267,183 @@ textarea.input {
   justify-content: center;
 }
 
-.plan-select {
+/* 品项选择：跟收货方一样用胶囊按钮点开选，替代粗糙的原生下拉 */
+.plan-pick {
   flex: 1 1 auto;
   min-width: 0;
-  height: 38px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 18px;
   background: var(--fill);
   color: var(--text);
   font-family: inherit;
-  font-size: 16px;
-  outline: none;
-}
-
-.plan-mini {
-  flex: 0 0 auto;
-  min-width: 40px;
-  height: 36px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--fill);
-  color: var(--sub);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
+  letter-spacing: -0.2px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  text-align: left;
 }
 
-.plan-mini.danger {
-  color: var(--danger);
+.plan-pick .dot {
+  flex: 0 0 auto;
+}
+
+.plan-pick b {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-pick.placeholder b {
+  color: var(--sub);
+  font-weight: 400;
+}
+
+.plan-pick .caret {
+  flex: 0 0 auto;
+}
+
+/* 品项弹层：直接从胶囊按钮处向下展开，覆盖后续行，不占整屏 */
+.plan-pick-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+  z-index: 60;
+}
+
+.plan-pick-title {
+  padding: 2px 6px 12px;
+  font-size: 13px;
+  color: var(--sub);
+  font-weight: 500;
+}
+
+.plan-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  text-align: left;
+}
+
+.plan-pick-item:active {
+  background: var(--fill);
+}
+
+.plan-pick-item.on {
+  background: var(--primary);
+  color: #fff;
+}
+
+.plan-pick-item .dot {
+  flex: 0 0 auto;
+}
+
+.plan-pick-item b {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-pick-item .check {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.plan-pick-item.on .check {
+  color: #fff;
 }
 
 .plan-row-fields {
   display: flex;
+  align-items: stretch;
   gap: 8px;
   margin-top: 8px;
 }
 
 .plan-row-fields .input {
   height: 44px;
-  padding: 0 10px;
+  padding: 0 12px;
   border-radius: 9px;
   font-size: 16px;
 }
 
-.plan-date {
+/* 日期胶囊：和品项同一套胶囊风格，高度跟箱数框对齐 */
+.plan-date-wrap {
+  position: relative;
   flex: 1 1 0;
   min-width: 0;
 }
 
+.plan-date-pick {
+  width: 100%;
+  height: 44px;
+  border-radius: 9px;
+  background: var(--fill);
+}
+
+.plan-date-pick:disabled {
+  opacity: 0.55;
+}
+
+/* 收货方：也做成胶囊下拉，为以后更多客户做准备 */
+.plan-customer-wrap {
+  position: relative;
+}
+
+.plan-customer-pick {
+  width: 100%;
+  height: 50px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--fill);
+  font-size: 17px;
+}
+
+.plan-customer-pick b {
+  font-size: 17px;
+}
+
+.plan-pick-sub {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 12.5px;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-pick-item.on .plan-pick-sub {
+  color: rgba(255, 255, 255, 0.72);
+}
+
 .plan-boxes {
   position: relative;
-  flex: 0 0 116px;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .plan-boxes .input {
@@ -2201,6 +2460,10 @@ textarea.input {
   margin: 0;
 }
 
+.plan-boxes .input.err {
+  border-color: var(--danger);
+}
+
 .plan-boxes em {
   position: absolute;
   right: 11px;
@@ -2212,28 +2475,11 @@ textarea.input {
   pointer-events: none;
 }
 
-.plan-quick {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.plan-quick > span {
-  font-size: 11px;
-  color: var(--faint);
-}
-
-.chip.tiny {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 14px;
-  font-size: 12px;
-}
-
-.chip.tiny em {
-  font-size: 10px;
+/* 箱数超库存的红字提示 */
+.plan-err {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--danger);
 }
 
 .btn.plan-add {

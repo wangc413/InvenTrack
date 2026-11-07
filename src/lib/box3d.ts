@@ -72,9 +72,18 @@ const VIEW_DIR = new THREE.Vector3(0.26, 0.62, 0.74).normalize()
 
 const texLoader = new THREE.TextureLoader()
 
-/** 设计稿按 sRGB 采样，开各向异性：斜看箱面时字不会糊成一片 */
-function artTexture(url: string) {
-  const t = texLoader.load(url)
+/**
+ * 设计稿按 sRGB 采样，开各向异性：斜看箱面时字不会糊成一片。
+ * webp 加载失败（老浏览器不支持 / 缓存坏 / 网络拦截）时走 onError 回退，
+ * 换成代码画的示意箱面，箱子永远有颜色、不会整块变黑。
+ */
+function artTexture(url: string, onError: (tex: THREE.Texture) => void) {
+  const t = texLoader.load(
+    url,
+    undefined,
+    undefined,
+    () => onError(t),
+  )
   t.colorSpace = THREE.SRGBColorSpace
   t.anisotropy = 8
   t.minFilter = THREE.LinearMipmapLinearFilter
@@ -453,10 +462,24 @@ export function mountBoxes(
     let matTop: THREE.Material
 
     if (art) {
-      // 设计稿：正面 / 侧面 / 顶面各一张，比例跟真实箱面一致，箱子就是印出来的样子
-      matFront = new THREE.MeshStandardMaterial({ map: artTexture(art.front), ...papery })
-      matSide = new THREE.MeshStandardMaterial({ map: artTexture(art.side), ...papery })
-      matTop = new THREE.MeshStandardMaterial({ map: artTexture(art.top), roughness: 0.9 })
+      // 设计稿：正面 / 侧面 / 顶面各一张，比例跟真实箱面一致，箱子就是印出来的样子。
+      // 同时各画一份示意箱面兜底：webp 加载失败时立刻换上，避免箱子黑成一块。
+      const face = faceTexture(sku)
+      const flank = sideTexture(sku)
+      const top = topTexture(sku)
+      matFront = new THREE.MeshStandardMaterial({
+        map: artTexture(art.front, () => { matFront.map = face; matFront.needsUpdate = true }),
+        ...papery,
+      })
+      matSide = new THREE.MeshStandardMaterial({
+        map: artTexture(art.side, () => { matSide.map = flank; matSide.needsUpdate = true }),
+        ...papery,
+      })
+      matTop = new THREE.MeshStandardMaterial({
+        map: artTexture(art.top, () => { matTop.map = top; matTop.needsUpdate = true }),
+        roughness: 0.9,
+      })
+      disposables.push(face, flank, top)
     } else {
       // 自己画：正面是品名，侧面是配料表 + 条码，各贴各的
       const face = faceTexture(sku)

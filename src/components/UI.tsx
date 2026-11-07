@@ -51,17 +51,27 @@ export function Stepper({
   step = 1,
   min = 0,
   max,
+  onMinus,
 }: {
   value: number
   onChange: (v: number) => void
   step?: number
   min?: number
   max?: number
+  onMinus?: () => void
 }) {
   const cap = max ?? Number.POSITIVE_INFINITY
+  const atMin = value <= min
   return (
     <div className="stepper">
-      <button onClick={() => onChange(Math.max(min, value - step))} aria-label="减少" disabled={value <= min}>
+      <button
+        onClick={() => {
+          if (atMin) onMinus?.()
+          else onChange(Math.max(min, value - step))
+        }}
+        aria-label="减少"
+        disabled={atMin && !onMinus}
+      >
         −
       </button>
       <div className="val num">{value}</div>
@@ -151,6 +161,11 @@ const ICONS: Record<string, ReactNode> = {
     <>
       <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
       <path d="M21 3v5h-5" />
+    </>
+  ),
+  check: (
+    <>
+      <path d="M5 12.5 10 17.5 19 7" />
     </>
   ),
 }
