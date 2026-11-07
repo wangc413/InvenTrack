@@ -1916,6 +1916,9 @@ textarea.input {
   position: fixed;
   inset: 0;
   z-index: 7;
+  /* 半透明压暗：弹层弹出时把下方内容（日期框、箱数框、后续行）压暗，
+     让弹层成为唯一焦点，避免浮层与下方元素"重合"看起来乱、点不准 */
+  background: rgba(0, 0, 0, 0.24);
 }
 
 .picker-pop {
@@ -2315,7 +2318,7 @@ textarea.input {
 /* 品项弹层：直接从胶囊按钮处向下展开，覆盖后续行，不占整屏 */
 .plan-pick-pop {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 8px);
   left: 0;
   right: 0;
   max-height: 260px;
