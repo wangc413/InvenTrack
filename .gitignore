@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 本地调试临时目录（CDP 无头浏览器、截图等），不提交
+.workbuddy/edge-*/
+.workbuddy/shots/
+.workbuddy/*.mjs

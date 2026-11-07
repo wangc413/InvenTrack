@@ -42,19 +42,16 @@ self.addEventListener('fetch', (e) => {
     return
   }
 
-  // 其余静态资源：缓存优先，命中即秒开；后台再拉新，有更新静默替换
+  // 其余静态资源：网络优先，拿到最新代码就更新缓存；断网时回退缓存（离线仍可用）
   e.respondWith(
-    caches.match(req).then((hit) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone()
-            caches.open(CACHE).then((c) => c.put(req, copy))
-          }
-          return res
-        })
-        .catch(() => hit)
-      return hit || network
-    }),
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone()
+          caches.open(CACHE).then((c) => c.put(req, copy))
+        }
+        return res
+      })
+      .catch(() => caches.match(req)),
   )
 })

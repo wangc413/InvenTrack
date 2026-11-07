@@ -9,6 +9,13 @@ import { initStore } from './lib/store'
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => undefined)
+    // 检测到新版本 SW 接管后，自动刷新一次，让用户拿到最新代码
+    let reloading = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return
+      reloading = true
+      window.location.reload()
+    })
   })
 }
 
