@@ -69,26 +69,50 @@ export function specOfOrder(db: ReturnType<typeof useDB>, order: Order): PalletS
 
 /* ---------- 新建车次：只定「谁、送到哪」 ---------- */
 
+/** 收货地记忆：输过一次就记住，存在本地，清数据也不丢 */
+const DEST_KEY = 'inventrack-destinations'
+
+function loadDestinations(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DEST_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function rememberDestination(d: string) {
+  const list = loadDestinations().filter((x) => x !== d)
+  list.unshift(d)
+  try {
+    localStorage.setItem(DEST_KEY, JSON.stringify(list.slice(0, 12)))
+  } catch {
+    /* 忽略 */
+  }
+}
+
 function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
   const db = useDB()
 
-  /** 最近用过的收货地，点一下直接填 */
+  /** 最近用过的收货地：本地记忆 + 历史车次，点一下直接填 */
   const recent = useMemo(() => {
     const out: string[] = []
-    for (const o of db.orders) {
-      const d = o.destination.trim()
-      if (d && !out.includes(d)) out.push(d)
+    for (const d of [...loadDestinations(), ...db.orders.map((o) => o.destination)]) {
+      const t = d.trim()
+      if (t && !out.includes(t)) out.push(t)
     }
-    return out.slice(0, 4)
+    return out.slice(0, 8)
   }, [db.orders])
 
   const [destination, setDestination] = useState('')
   const [customerId, setCustomerId] = useState('')
 
   const create = () => {
-    if (!destination.trim()) return toast('先填收货地')
+    const dest = destination.trim()
+    if (!dest) return toast('先填收货地')
     if (!customerId) return toast('先选收货方')
-    const id = createOrder({ destination: destination.trim(), customerId })
+    rememberDestination(dest)
+    const id = createOrder({ destination: dest, customerId })
     onCreated(id)
   }
 
@@ -217,7 +241,8 @@ function overText(over: { x: number; z: number }) {
     // 起点按这个品的固定码法算：满层几个、能码几层
     setLayers(maxLayers(s))
     setTopCount(layerPlan(s).perLayer)
-    setMenu(null)
+    // 选品和日期是一个连贯动作：品定了，紧接着看这个品有哪些日期
+    setMenu('date')
   }
 
   const pickDate = (d: string) => {
@@ -293,7 +318,9 @@ function overText(over: { x: number; z: number }) {
             <>
               <div className="picker-mask" onClick={() => setMenu(null)} />
               <div className="picker-pop">
-                <div className="picker-pop-title">{menu === 'sku' ? '这趟发哪几个品' : '用哪个生产日期'}</div>
+                <div className="picker-pop-title">
+                  {menu === 'sku' ? '这趟发哪几个品' : `${sku ? nickOf(sku) : ''} · 用哪个生产日期`}
+                </div>
                 {menu === 'sku' &&
                   (skus.length > 0 ? (
                     <div className="chips">
@@ -335,39 +362,43 @@ function overText(over: { x: number; z: number }) {
 
         <div className={`pack-stage ${sku ? 'with-ops' : ''}`}>
           <Box3D pallets={spec} emptyPallet />
-          {!sku && <div className="pack-empty">选个品，箱子就码上来了</div>}
+          {!sku && (
+            <div className="pack-empty">
+              选个品，箱子就码上来了
+              <span>品和日期都在上面，选完直接加减层数</span>
+            </div>
+          )}
 
           {sku && (
-            <div className="pack-ops">
-              <div className="op-head">
-                <div className="who">
-                  <b>{nickOf(sku)}</b>
-                  <span>{boxes} 箱</span>
-                  <em>{formula}</em>
+            <>
+              {/* 右手拇指区：层数、顶层上下两个步进器，直接在 3D 上加减 */}
+              <div className="pack-side">
+                <div className="side-step">
+                  <span>层数</span>
+                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
                 </div>
-                <div className={`sub ${warn ? 'warn' : ''}`}>
+                <div className="side-step">
+                  <span>顶层</span>
+                  <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
+                </div>
+              </div>
+
+              {/* 总数不加卡片，直接压在 3D 上：口算式 + 特大的箱数 */}
+              <div className="pack-total">
+                <div className="total-line">
+                  <span className="expr">{formula} =</span>
+                  <b className="num">{boxes}</b>
+                  <i>箱</i>
+                </div>
+                <div className={`total-sub ${warn ? 'warn' : ''}`}>
                   {warn || (prodDate ? `这天还能装 ${avail} 箱` : '还没选生产日期')}
                 </div>
+                <div className={`total-note ${plan?.over ? 'warn' : ''}`}>
+                  {plan?.note} · 隔层调头
+                  {plan?.over ? ` · 一层 ${perLayer} 箱，比板 ${overText(plan.over)}` : ''}
+                </div>
               </div>
-              <div className="op">
-                <span>码几层</span>
-                <Stepper value={layers} min={1} max={24} onChange={setLayers} />
-              </div>
-              <div className="op">
-                <span>顶层几个</span>
-                <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
-              </div>
-              <div className="op static">
-                <span>每层</span>
-                <b>{perLayer}</b>
-              </div>
-              <div className={`op-note ${plan?.over ? 'warn' : ''}`}>
-                {plan?.note} · 隔层调头
-                {plan?.over
-                  ? ` · 一层 ${perLayer} 箱，比板 ${overText(plan.over)}`
-                  : ''}
-              </div>
-            </div>
+            </>
           )}
         </div>
       </div>
