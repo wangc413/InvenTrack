@@ -1794,7 +1794,7 @@ textarea.input {
 /* 品 / 日期 收成两个小下拉，点开才铺开选项；宽度跟着内容走，不撑满一行 */
 .pack-pick {
   position: relative;
-  z-index: 6;
+  z-index: 8;
   display: flex;
   gap: 6px;
   padding: 0 12px 8px;
@@ -2250,6 +2250,9 @@ textarea.input {
   align-items: center;
   gap: 8px;
   position: relative;
+  /* 建立独立层叠上下文，确保弹层盖过 picker-mask（fixed，z-index 7），
+     避免 iOS Safari 里 fixed 遮罩盖住 absolute 弹层导致点不到选项 */
+  z-index: 8;
 }
 
 .plan-idx {
@@ -2397,6 +2400,7 @@ textarea.input {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
+  z-index: 8;
 }
 
 .plan-date-pick {
@@ -2413,6 +2417,7 @@ textarea.input {
 /* 收货方：也做成胶囊下拉，为以后更多客户做准备 */
 .plan-customer-wrap {
   position: relative;
+  z-index: 8;
 }
 
 .plan-customer-pick {
