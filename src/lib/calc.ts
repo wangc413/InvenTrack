@@ -150,6 +150,44 @@ function shaomaiPlan(sku: Sku): LayerPlan {
 }
 
 /**
+ * 饺子的固定码法：一层 10 个 = 左边 6 个（2 列 × 3 排）+ 右边 4 个（1 列 × 4 排，转 90°）。
+ *
+ *   左块 6 竖：长边 430 顺着 1.2 m，3 排占 3×430 = 1290；2 列顺着 1 m 占 2×300 = 600
+ *   右块 4 横：转 90°，4 排顺着 1.2 m 占 4×300 = 1200（正好齐着板长），1 列顺 1 m 占 430
+ *
+ * 两块拼起来 600 + 430 = 1030 对 1 m —— 左右各探 15 mm；
+ * 长边这块 3×430 = 1290 对 1.2 m —— 前后各探 45 mm。
+ * 现场就是这么码的（纸箱有压缩量、垛外面还有缠膜和挡板），所以只把探出量报上去提醒，不硬拦。
+ * 右块沿板长居中，跟左块的 3 排错开半格，下一层调头过来正好压住缝。
+ */
+function jiaoziPlan(sku: Sku): LayerPlan {
+  const l = Math.max(1, sku.boxL) // 430
+  const w = Math.max(1, sku.boxW) // 300
+  const spanZ = 2 * w + l // 顺着 1 m 那边：左 2 列 + 右 1 列
+  const spanX = Math.max(3 * l, 4 * w) // 顺着 1.2 m 那边
+  const z0 = -spanZ / 2
+  const slots: Slot[] = []
+  // 左块 6 竖：2 列 × 3 排
+  for (let c = 0; c < 2; c++) {
+    for (let r = 0; r < 3; r++) {
+      slots.push({ x: (r - 1) * l, z: z0 + w / 2 + c * w, turn: false })
+    }
+  }
+  // 右块 4 横：转 90°，1 列 × 4 排，沿板长居中
+  for (let r = 0; r < 4; r++) {
+    slots.push({ x: (r - 1.5) * w, z: z0 + 2 * w + l / 2, turn: true })
+  }
+  const over = { x: Math.max(0, spanX - PALLET_L), z: Math.max(0, spanZ - PALLET_W) }
+  return {
+    perLayer: slots.length,
+    slots,
+    note: '6 竖（2×3）+ 4 横（一列）',
+    fixed: true,
+    ...(over.x > 0 || over.z > 0 ? { over } : {}),
+  }
+}
+
+/**
  * 按「一层要几个」铺：箱子一行一行码，整行要么长边顺 1.2 m、要么转 90°。
  * 摆不满托盘时按最省的方式选行数，算出探出多少 —— 现场确实会把箱子堆到板沿外，
  * 所以这里不硬拦，只把探出量报上去让界面提醒。
@@ -216,13 +254,13 @@ function rowsPlan(sku: Sku, want: number): LayerPlan {
 /**
  * 现场定的「一层几个」：
  *   包子 7（3 竖 + 4 横）、糯米鸡 7（同样码法）、烧麦 5（3 竖 + 2 横留缝）、
- *   饺子 10（4 + 4 + 2 三排，比板长 16 cm，探出板边）、菜团子 8（2 + 3 + 3 三排，比板宽 24 cm）。
+ *   饺子 10（6 竖 + 4 横，两块拼，两边略探出板沿）、菜团子 8（2 + 3 + 3 三排，比板宽 24 cm）。
  * 只写死一行个数，具体怎么摆还是按箱规算，换箱规不会算出重叠。
  */
 export function layerPlan(sku: Sku): LayerPlan {
   const key = `${sku.name}${sku.shortName}`
   if (/烧麦/.test(key)) return shaomaiPlan(sku)
-  if (/饺子|水饺/.test(key)) return rowsPlan(sku, 10)
+  if (/饺子|水饺/.test(key)) return jiaoziPlan(sku)
   if (/菜团子/.test(key)) return rowsPlan(sku, 8)
   if (/菜包|肉包|糯米鸡/.test(key)) return baoPlan(sku)
   return gridPlan(sku)
@@ -250,6 +288,18 @@ export function maxPerLayer(sku: Sku) {
 /** 这个箱规最多能码几层：按 1.8 米总高倒推 */
 export function maxLayers(sku: Sku) {
   return Math.max(1, Math.floor((MAX_STACK_H - PALLET_H) / Math.max(50, sku.boxH)))
+}
+
+/**
+ * 层数口算式：「6 层 × 7 个 + 顶层 5 个」，一眼能对上总数。
+ * 顶层码满就不带尾巴，直接「7 层 × 7 个」；只有一层时也不搞乘法。
+ */
+export function layerFormula(layers: number, perLayer: number, topCount: number) {
+  const top = Math.min(Math.max(1, topCount), Math.max(1, perLayer))
+  if (layers <= 1) return `1 层 ${top} 个`
+  return top >= perLayer
+    ? `${layers} 层 × ${perLayer} 个`
+    : `${layers - 1} 层 × ${perLayer} 个 + 顶层 ${top} 个`
 }
 
 export type PalletStat = {

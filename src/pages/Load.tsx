@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Box3D from '../components/Box3D'
 import { Icon, Stepper, toast } from '../components/UI'
-import { PALLET_H, fmt, fmtDate, layerPlan, maxLayers, summarize } from '../lib/calc'
+import { PALLET_H, fmt, fmtDate, layerFormula, layerPlan, maxLayers, summarize } from '../lib/calc'
 import {
   DEFAULT_LAYERS,
   DEFAULT_PER_LAYER,
@@ -24,6 +24,37 @@ import {
 } from '../lib/store'
 
 export type PalletSpec3D = { no: string; sku: Sku; layers: number; perLayer: number; topCount: number }
+
+/**
+ * 图标按钮，点一下先进入待确认状态（变红、出「确认」二字），再点一下才真正执行。
+ * 板上几百箱货，误触一下移除就全没了 —— 这一停必须留。
+ */
+function ConfirmIconBtn({ icon, label, onConfirm }: { icon: string; label: string; onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  return (
+    <button
+      type="button"
+      className={`pallet-ico ${armed ? 'armed' : ''}`}
+      title={label}
+      aria-label={armed ? `确认${label}` : label}
+      onClick={() => {
+        if (armed) {
+          window.clearTimeout(timer.current)
+          setArmed(false)
+          onConfirm()
+          return
+        }
+        setArmed(true)
+        timer.current = window.setTimeout(() => setArmed(false), 2600)
+      }}
+    >
+      <Icon name={icon} size={15} />
+      {armed && <span>确认</span>}
+    </button>
+  )
+}
 
 /** 从车次算出 3D 预览需要的规格 */
 export function specOfOrder(db: ReturnType<typeof useDB>, order: Order): PalletSpec3D[] {
@@ -147,21 +178,22 @@ function PackingBoard({ order, editing, onBack }: { order: Order; editing: Palle
   const dates = sku ? stockByDate(db, sku.id) : []
   const picked = dates.find((d) => d.prodDate === prodDate)
 
-  /** 一层比托盘多出来多少，给成「前后各 8 厘米」这样的人话 */
+  /** 一层比托盘多出来多少，给成「前后各 4.5 厘米」这样的人话（按单边算） */
 function overText(over: { x: number; z: number }) {
   const parts: string[] = []
-  if (over.x > 0) parts.push(`左右各 ${Math.round(over.x / 20)} 厘米`)
-  if (over.z > 0) parts.push(`前后各 ${Math.round(over.z / 20)} 厘米`)
+  if (over.x > 0) parts.push(`左右各 ${fmt(over.x / 20, 1)} 厘米`)
+  if (over.z > 0) parts.push(`前后各 ${fmt(over.z / 20, 1)} 厘米`)
   return `${parts.join('、')}`
 }
 
-/** 一层怎么摆是写死的：包子 3 竖 + 4 横 = 7 个，烧麦 3 竖 + 2 横 = 5 个 */
+/** 一层怎么摆是写死的：包子 3 竖 + 4 横 = 7 个，烧麦 3 竖 + 2 横 = 5 个，饺子 6 竖 + 4 横 = 10 个 */
   const plan = sku ? layerPlan(sku) : null
   const perLayer = plan?.perLayer ?? 0
   const perBox = sku?.perBox || 1
   const top = perLayer > 0 ? Math.min(Math.max(1, topCount), perLayer) : 0
   const boxes = sku ? Math.max(0, (layers - 1) * perLayer + top) : 0
-  const qty = boxes * perBox
+  /** 口算式：码的时候随时能对总数 */
+  const formula = sku ? layerFormula(layers, perLayer, top) : ''
 
   /** 这个日期账面上还剩多少箱 */
   const leftBoxes = Math.floor((picked?.left ?? 0) / perBox)
@@ -311,7 +343,7 @@ function overText(over: { x: number; z: number }) {
                 <div className="who">
                   <b>{nickOf(sku)}</b>
                   <span>{boxes} 箱</span>
-                  <em>{qty} 件</em>
+                  <em>{formula}</em>
                 </div>
                 <div className={`sub ${warn ? 'warn' : ''}`}>
                   {warn || (prodDate ? `这天还能装 ${avail} 箱` : '还没选生产日期')}
@@ -550,30 +582,31 @@ export default function Load() {
           const sku = db.skus.find((s) => s.id === p.skuId)
           const boxes = palletBoxes(p)
           return (
-            <div className="card card-pad pallet-card" key={p.id}>
+            <div className="card pallet-card" key={p.id}>
               <div className="pallet-head">
                 <span className="pallet-no">{p.no}</span>
-                <span className="pallet-name">{sku ? nickOf(sku) : '品项已删除'}</span>
-                <span className="pallet-boxes">{boxes} 箱</span>
+                <b className="pallet-name">{sku ? nickOf(sku) : '品项已删除'}</b>
+                <span className="pallet-boxes">
+                  {boxes}
+                  <i>箱</i>
+                </span>
               </div>
-              <div className="pallet-meta">
+              <div className="pallet-sub">
                 <span className="dot" style={{ background: sku?.accentColor ?? '#999' }} />
-                {fmtDate(p.prodDate)} · {p.layers} 层 × {p.perLayer}
-                {p.topCount !== p.perLayer ? ` · 顶层 ${p.topCount}` : ''} · {sku ? boxes * sku.perBox : 0} 件
-              </div>
-              <div className="pallet-actions">
-                <button className="btn sm" onClick={() => setPacking({ editId: p.id })}>
-                  重码
-                </button>
-                <button
-                  className="btn sm"
-                  onClick={() => {
-                    removePallet(draft.id, p.id)
-                    toast(`${p.no} 已移除`)
-                  }}
-                >
-                  移除
-                </button>
+                <span className="pallet-formula">
+                  {fmtDate(p.prodDate)} · {layerFormula(p.layers, p.perLayer, p.topCount)}
+                </span>
+                <span className="pallet-ops">
+                  <ConfirmIconBtn icon="redo" label="重码" onConfirm={() => setPacking({ editId: p.id })} />
+                  <ConfirmIconBtn
+                    icon="trash"
+                    label="移除"
+                    onConfirm={() => {
+                      removePallet(draft.id, p.id)
+                      toast(`${p.no} 已移除`)
+                    }}
+                  />
+                </span>
               </div>
             </div>
           )
