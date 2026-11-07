@@ -370,23 +370,12 @@ function overText(over: { x: number; z: number }) {
           )}
 
           {sku && (
-            <>
-              {/* 右手拇指区：层数、顶层上下两个步进器，直接在 3D 上加减 */}
-              <div className="pack-side">
-                <div className="side-step">
-                  <span>层数</span>
-                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
-                </div>
-                <div className="side-step">
-                  <span>顶层</span>
-                  <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
-                </div>
-              </div>
-
-              {/* 总数不加卡片，直接压在 3D 上：口算式 + 特大的箱数 */}
-              <div className="pack-total">
-                <div className="total-line">
-                  <span className="expr">{formula} =</span>
+            <div className="pack-hud">
+              {/* 左下：口算式 + 特大的总箱数，按步进器时眼角就能扫到变化 */}
+              <div className="hud-info">
+                <span className="expr">{formula}</span>
+                <div className="num-row">
+                  <span className="eq">=</span>
                   <b className="num">{boxes}</b>
                   <i>箱</i>
                 </div>
@@ -398,7 +387,19 @@ function overText(over: { x: number; z: number }) {
                   {plan?.over ? ` · 一层 ${perLayer} 箱，比板 ${overText(plan.over)}` : ''}
                 </div>
               </div>
-            </>
+
+              {/* 右下：层数、顶层上下两个大按钮组，手机右手拇指直接按 */}
+              <div className="hud-steps">
+                <div className="step-chip">
+                  <span className="lab">层数</span>
+                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
+                </div>
+                <div className="step-chip">
+                  <span className="lab">顶层</span>
+                  <Stepper value={top} min={1} max={perLayer} onChange={setTopCount} />
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

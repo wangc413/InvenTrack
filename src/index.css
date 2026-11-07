@@ -1905,7 +1905,7 @@ textarea.input {
 
 /* 底下留出总数和发车按钮的高度，箱垛不会被压在文字后面 */
 .pack-stage.with-ops .box3d {
-  inset: 0 0 96px 0;
+  inset: 0 0 104px 0;
 }
 
 /* 还没选品时的一句话，放大放正中 */
@@ -1945,102 +1945,69 @@ textarea.input {
   right: 12px;
 }
 
-/* 右手拇指区：层数 / 顶层上下两个步进器，浮在 3D 右侧，不加卡片底 */
-.pack-side {
+/* 右下角操作区：左边口算式 + 特大总箱数，右边层数/顶层大按钮组，
+   两个贴在一起 —— 按 + − 的时候眼角就能看到箱数变 */
+.pack-hud {
   position: absolute;
+  left: 14px;
   right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 8px;
   z-index: 5;
   display: flex;
-  flex-direction: column;
+  align-items: flex-end;
   gap: 10px;
 }
 
-.pack-side .side-step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 7px 7px;
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.86);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.09);
-}
-
-.pack-side .side-step > span {
-  font-size: 11px;
-  letter-spacing: 0;
-  color: var(--sub);
-}
-
-.pack-side .stepper {
-  flex: 0 0 auto;
-  background: var(--fill);
-  border-radius: 9px;
-}
-
-.pack-side .stepper button {
-  width: 32px;
-  height: 32px;
-  font-size: 17px;
-}
-
-.pack-side .stepper .val {
-  min-width: 24px;
-  font-size: 15px;
-  padding: 0;
-}
-
-/* 总数不加卡片，直接压在 3D 左下角：口算式小字 + 特大的箱数 */
-.pack-total {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 8px;
-  z-index: 5;
+.pack-hud .hud-info {
+  flex: 1 1 auto;
+  min-width: 0;
   pointer-events: none;
 }
 
-.pack-total .total-line {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-}
-
-.pack-total .expr {
-  font-size: 13.5px;
+.pack-hud .expr {
+  display: block;
+  font-size: 12.5px;
   letter-spacing: -0.2px;
   color: var(--sub);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pack-hud .num-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.pack-hud .eq {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sub);
 }
 
 /* 总箱数要一眼看到：特大加粗 */
-.pack-total .num {
-  font-size: 36px;
+.pack-hud .num {
+  font-size: 42px;
   font-weight: 800;
-  letter-spacing: -1px;
+  letter-spacing: -1.5px;
   line-height: 1;
   color: var(--text);
   font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
 }
 
-.pack-total .total-line i {
+.pack-hud .num-row i {
   font-style: normal;
   font-size: 14px;
   font-weight: 600;
   color: var(--sub);
 }
 
-.pack-total .total-sub {
-  margin-top: 3px;
+.pack-hud .total-sub {
+  margin-top: 4px;
   font-size: 12px;
-  line-height: 1.35;
+  line-height: 1.3;
   letter-spacing: 0;
   color: var(--sub);
   white-space: nowrap;
@@ -2048,14 +2015,14 @@ textarea.input {
   text-overflow: ellipsis;
 }
 
-.pack-total .total-sub.warn {
+.pack-hud .total-sub.warn {
   color: var(--danger);
   font-weight: 500;
 }
 
-.pack-total .total-note {
+.pack-hud .total-note {
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.3;
   letter-spacing: 0;
   color: var(--faint);
   white-space: nowrap;
@@ -2064,8 +2031,54 @@ textarea.input {
 }
 
 /* 一层摆不下托盘时，这行变红提醒探出多少 */
-.pack-total .total-note.warn {
+.pack-hud .total-note.warn {
   color: var(--danger);
+}
+
+/* 层数 / 顶层：两个 40px 大按钮一排，上下堆在右下角 */
+.pack-hud .hud-steps {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pack-hud .step-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.09);
+}
+
+.pack-hud .lab {
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--sub);
+  flex: 0 0 auto;
+}
+
+.pack-hud .stepper {
+  flex: 0 0 auto;
+  background: var(--fill);
+  border-radius: 10px;
+}
+
+.pack-hud .stepper button {
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+}
+
+.pack-hud .stepper .val {
+  min-width: 28px;
+  font-size: 18px;
+  font-weight: 600;
+  padding: 0;
 }
 
 /* 品类标签上的色点 */
