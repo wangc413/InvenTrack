@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Box3D from '../components/Box3D'
 import { Icon, Stepper, toast } from '../components/UI'
-import { PALLET_H, fmt, fmtDate, layerFormula, layerPlan, maxLayers, summarize } from '../lib/calc'
+import { PALLET_H, fmt, fmtDate, layerExpr, layerPlan, maxLayers, summarize } from '../lib/calc'
 import {
   DEFAULT_LAYERS,
   DEFAULT_PER_LAYER,
@@ -193,7 +193,7 @@ function overText(over: { x: number; z: number }) {
   const top = perLayer > 0 ? Math.min(Math.max(1, topCount), perLayer) : 0
   const boxes = sku ? Math.max(0, (layers - 1) * perLayer + top) : 0
   /** 口算式：码的时候随时能对总数 */
-  const formula = sku ? layerFormula(layers, perLayer, top) : ''
+  const formula = sku ? layerExpr(layers, perLayer, top) : ''
 
   /** 这个日期账面上还剩多少箱 */
   const leftBoxes = Math.floor((picked?.left ?? 0) / perBox)
@@ -585,16 +585,15 @@ export default function Load() {
             <div className="card pallet-card" key={p.id}>
               <div className="pallet-head">
                 <span className="pallet-no">{p.no}</span>
-                <b className="pallet-name">{sku ? nickOf(sku) : '品项已删除'}</b>
-                <span className="pallet-boxes">
-                  {boxes}
-                  <i>箱</i>
-                </span>
+                <b className="pallet-name">
+                  <span className="dot" style={{ background: sku?.accentColor ?? '#999' }} />
+                  <span className="pallet-name-text">{sku ? nickOf(sku) : '品项已删除'}</span>
+                  <i className="pallet-date">· {fmtDate(p.prodDate)}</i>
+                </b>
               </div>
               <div className="pallet-sub">
-                <span className="dot" style={{ background: sku?.accentColor ?? '#999' }} />
                 <span className="pallet-formula">
-                  {fmtDate(p.prodDate)} · {layerFormula(p.layers, p.perLayer, p.topCount)}
+                  {layerExpr(p.layers, p.perLayer, p.topCount)} <b>= {boxes} 箱</b>
                 </span>
                 <span className="pallet-ops">
                   <ConfirmIconBtn icon="redo" label="重码" onConfirm={() => setPacking({ editId: p.id })} />

@@ -291,15 +291,13 @@ export function maxLayers(sku: Sku) {
 }
 
 /**
- * 层数口算式：「6 层 × 7 个 + 顶层 5 个」，一眼能对上总数。
+ * 层数口算式：「8 层 × 7 个 + 顶层 6 个」，一眼能对上总数。
  * 顶层码满就不带尾巴，直接「7 层 × 7 个」；只有一层时也不搞乘法。
  */
-export function layerFormula(layers: number, perLayer: number, topCount: number) {
+export function layerExpr(layers: number, perLayer: number, topCount: number) {
   const top = Math.min(Math.max(1, topCount), Math.max(1, perLayer))
   if (layers <= 1) return `1 层 ${top} 个`
-  return top >= perLayer
-    ? `${layers} 层 × ${perLayer} 个`
-    : `${layers - 1} 层 × ${perLayer} 个 + 顶层 ${top} 个`
+  return top >= perLayer ? `${layers} 层 × ${perLayer} 个` : `${layers - 1} 层 × ${perLayer} 个 + 顶层 ${top} 个`
 }
 
 export type PalletStat = {
