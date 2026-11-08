@@ -5,6 +5,7 @@ import {
   PALLET_H,
   fmt,
   fmtDate,
+  fmtTime,
   layerExpr,
   layerPlan,
   maxLayers,
@@ -1149,6 +1150,9 @@ export default function Load() {
               <div className="pallet-sub">
                 <span className="pallet-formula">
                   {layerExpr(p.layers, p.perLayer, p.topCount)} <b>= {boxes} 箱</b>
+                </span>
+                <span className="pallet-time" title="上车时间">
+                  {fmtTime(p.createdAt)}
                 </span>
                 <span className="pallet-ops">
                   <ConfirmIconBtn icon="redo" label="重码" onConfirm={() => setPacking({ editId: p.id })} />

@@ -1453,6 +1453,15 @@ textarea.input {
   flex: 0 0 auto;
 }
 
+/* 上车时间：淡色小字，跟在口算式后面，一眼看到每板几点装好 */
+.pallet-time {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
+
 /* 图标按钮：点一下先待确认（变红出「确认」），再点才执行；40px 起步的点击区，按得准也不容易误触 */
 .pallet-ico {
   display: inline-flex;
