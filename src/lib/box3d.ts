@@ -568,17 +568,24 @@ export function mountBoxes(
       return
     }
 
-    // 托盘就是 1.2 m × 1 m，一块板占一格，横向排开
+    // 托盘就是 1.2 m × 1 m。多块板按网格排：每行最多 3 块，排满换行，观感紧凑不拉成长条
     const palletL = PALLET_L * MM
     const palletW = PALLET_W * MM
     const gap = 0.34
-    const totalW = list.length * palletL + gap * Math.max(0, list.length - 1)
-    let cursor = -totalW / 2
+    const perRow = 3
+    const rows = Math.ceil(list.length / perRow)
+    const totalW = Math.min(list.length, perRow) * palletL + gap * Math.max(0, Math.min(list.length, perRow) - 1)
+    const totalD = rows * palletW + gap * Math.max(0, rows - 1)
+    let idx = 0
 
     for (const p of list) {
+      const col = idx % perRow
+      const row = Math.floor(idx / perRow)
+      idx++
+
       const group = new THREE.Group()
-      group.position.x = cursor + palletL / 2
-      cursor += palletL + gap
+      group.position.x = -totalW / 2 + col * (palletL + gap) + palletL / 2
+      group.position.z = -totalD / 2 + row * (palletW + gap) + palletW / 2
       root.add(group)
 
       group.add(makePalletMesh(palletL, palletW, wood, woodDark, transient))

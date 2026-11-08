@@ -436,12 +436,10 @@ function PackingBoard({
   order,
   editing,
   onBack,
-  onDone,
 }: {
   order: Order
   editing: Pallet | null
   onBack: () => void
-  onDone: () => void
 }) {
   const db = useDB()
   const skus = skusOfCustomer(db, order.customerId)
@@ -609,9 +607,10 @@ function overText(over: { x: number; z: number }) {
         toast(`这个批次装完啦，换品 → ${nickOf(nextSku)} ${fmtDate(next.prodDate)}，还差 ${leftOf(next)} 箱`)
       }
     } else {
-      // 有计划且全部装齐 → 直接跳发车界面
+      // 有计划且全部装齐 → 回总览页，让用户核对所有板数和每板装量后再手动发车
       if (planLines.length > 0) {
-        onDone()
+        toast('计划已全部装齐，回到总览核对后发车')
+        onBack()
         return
       }
       // 没有待装计划了（纯临时装货），3D 回到一块空托盘接着装
@@ -990,10 +989,6 @@ export default function Load() {
         order={draft}
         editing={editingPallet}
         onBack={() => setPacking(null)}
-        onDone={() => {
-          setPacking(null)
-          confirmShip()
-        }}
       />
     )
   }
