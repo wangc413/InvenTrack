@@ -908,13 +908,28 @@ export function Viewer3D({
           <div className="viewer-pick">
             <div className="viewer-pick-head">
               <span className="viewer-pick-no">{palletName(sel.no)}</span>
-              <span className="viewer-pick-name">{selSku ? nickOf(selSku) : '品项已删除'}</span>
-              <b className="viewer-pick-boxes">{selBoxes} 箱</b>
+              <span className="viewer-pick-name">
+                <span className="dot" style={{ background: selSku?.accentColor ?? '#999' }} />
+                {selSku ? nickOf(selSku) : '品项已删除'}
+              </span>
+            </div>
+            <div className="viewer-pick-boxes">
+              <b>{selBoxes}</b>
+              <span>箱</span>
             </div>
             <div className="viewer-pick-meta">
-              <span>生产日期 {fmtDate(sel.prodDate)}</span>
-              <span>上车 {fmtTime(sel.createdAt)}</span>
-              <span>{layerExpr(sel.layers, sel.perLayer, sel.topCount)}</span>
+              <div className="viewer-pick-item">
+                <em>生产日期</em>
+                <b>{fmtDate(sel.prodDate)}</b>
+              </div>
+              <div className="viewer-pick-item">
+                <em>上车时间</em>
+                <b>{fmtTime(sel.createdAt)}</b>
+              </div>
+              <div className="viewer-pick-item viewer-pick-item-full">
+                <em>码法</em>
+                <b>{layerExpr(sel.layers, sel.perLayer, sel.topCount)}</b>
+              </div>
             </div>
           </div>
         ) : (

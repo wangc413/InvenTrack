@@ -1718,22 +1718,26 @@ textarea.input {
   padding: 0 4px;
 }
 
-/* 点 3D 里某块板后，底部浮出的单板详情卡 */
+/* 点 3D 里某块板后，底部浮出的大号单板详情卡 */
 .viewer-pick {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: var(--fill);
+  padding: 16px 16px 14px;
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
   margin-bottom: 8px;
 }
 
 .viewer-pick-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 
 .viewer-pick-no {
   flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--fill);
   font-size: 12px;
   font-weight: 700;
   color: var(--sub);
@@ -1741,31 +1745,83 @@ textarea.input {
 }
 
 .viewer-pick-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
+  letter-spacing: -0.2px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.viewer-pick-boxes {
+.viewer-pick-name .dot {
   flex: 0 0 auto;
-  font-size: 17px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* 超大箱数：一眼看清这一板有多少箱 */
+.viewer-pick-boxes {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 14px 0 14px;
+}
+
+.viewer-pick-boxes b {
+  font-size: 52px;
   font-weight: 700;
+  line-height: 1;
+  letter-spacing: -2px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
-.viewer-pick-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 6px;
-  font-size: 12px;
+.viewer-pick-boxes span {
+  font-size: 16px;
+  font-weight: 500;
   color: var(--sub);
+}
+
+/* 信息格：生产日期 / 上车时间并排，码法占满整行 */
+.viewer-pick-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 8px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--line);
+}
+
+.viewer-pick-item {
+  min-width: 0;
+}
+
+.viewer-pick-item-full {
+  grid-column: 1 / -1;
+}
+
+.viewer-pick-item em {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--faint);
+  margin-bottom: 3px;
+}
+
+.viewer-pick-item b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 还没点板时的引导提示 */
@@ -1862,7 +1918,7 @@ textarea.input {
   color: var(--text);
 }
 
-.viewer-info em {
+.viewer-total em {
   font-style: normal;
   font-size: 12px;
   color: var(--sub);
@@ -1870,7 +1926,7 @@ textarea.input {
   text-align: right;
 }
 
-.viewer-info b {
+.viewer-total b {
   font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;

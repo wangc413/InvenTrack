@@ -548,9 +548,34 @@ export function mountBoxes(
 
   /** 每块板的 group，按索引对应；点击拾取和选中高亮都靠它 */
   const palletGroups: THREE.Group[] = []
-  /** 每块板的高亮外壳（半透明罩，选中时才显示） */
+  /** 每块板的悬浮投影（地面虚化阴影，选中时才显示） */
   const highlights: THREE.Mesh[] = []
+  /** 每块板的描边轮廓（选中时才显示） */
+  const outlines: THREE.LineSegments[] = []
+  /** 共享的投影纹理，只生成一次 */
+  let shadowTex: THREE.CanvasTexture | null = null
   let selectedIdx = -1
+
+  /**
+   * 悬浮投影：径向渐变的柔和阴影，中心略深、边缘虚化到全透明，
+   * 贴在地面模拟"这块板浮起来了"投下的影子，比实心色块高级。
+   */
+  function shadowTexture(): THREE.CanvasTexture {
+    const S = 256
+    const cv = document.createElement('canvas')
+    cv.width = S
+    cv.height = S
+    const ctx = cv.getContext('2d')!
+    const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
+    g.addColorStop(0, 'rgba(28, 28, 30, 0.32)')
+    g.addColorStop(0.55, 'rgba(28, 28, 30, 0.16)')
+    g.addColorStop(1, 'rgba(28, 28, 30, 0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, S, S)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace
+    return tex
+  }
 
   function clearRoot() {
     for (const d of transient) d.dispose()
@@ -558,6 +583,7 @@ export function mountBoxes(
     root.clear()
     palletGroups.length = 0
     highlights.length = 0
+    outlines.length = 0
     selectedIdx = -1
   }
 
@@ -626,22 +652,39 @@ export function mountBoxes(
         }
       }
 
-      // 选中高亮：一块柔和的橙色光斑贴在地面（放 root 层，不随板抬高），选中时亮起
-      const hlGeo = new THREE.CircleGeometry(Math.max(palletL, palletW) * 0.58, 40)
+      // 悬浮投影：柔和阴影贴在地面（放 root 层，不随板抬高），选中时显示
+      if (!shadowTex) shadowTex = shadowTexture()
+      const hlGeo = new THREE.PlaneGeometry(Math.max(palletL, palletW) * 1.5, Math.max(palletL, palletW) * 1.5)
       const hlMat = new THREE.MeshBasicMaterial({
-        color: 0xff9f43,
+        map: shadowTex,
         transparent: true,
-        opacity: 0.5,
         depthWrite: false,
       })
       const hl = new THREE.Mesh(hlGeo, hlMat)
       hl.rotation.x = -Math.PI / 2
-      hl.position.set(group.position.x, 0.005, group.position.z)
+      hl.position.set(group.position.x, 0.006, group.position.z)
       hl.visible = false
-      hl.renderOrder = 10
+      hl.renderOrder = 9
       root.add(hl)
       transient.push(hlGeo, hlMat)
       highlights.push(hl)
+
+      // 描边轮廓：紧贴整块板（托盘+箱子堆）外沿的一圈亮蓝边，选中时显示，和纸箱形成强对比
+      const edgeH = Math.max(0.42, (p.layers * p.sku.boxH + PALLET_H) * MM)
+      const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(palletL * 1.02, edgeH, palletW * 1.02))
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: 0x2f7cff,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: true,
+      })
+      const edge = new THREE.LineSegments(edgeGeo, edgeMat)
+      edge.position.y = edgeH / 2
+      edge.visible = false
+      group.add(edge)
+      transient.push(edgeGeo, edgeMat)
+      outlines.push(edge)
+
       palletGroups.push(group)
     }
 
@@ -678,15 +721,18 @@ export function mountBoxes(
   const ro = new ResizeObserver(resize)
   ro.observe(container)
 
-  /** 选中高亮某块板，-1 取消：选中的板整体抬高 + 底部光斑亮起，一眼认出是哪块 */
+  /** 选中高亮某块板，-1 取消：选中的板整体抬高 + 投影 + 描边，一眼认出是哪块 */
   function select(index: number) {
     selectedIdx = index
     highlights.forEach((hl, i) => {
       hl.visible = i === index
     })
+    outlines.forEach((e, i) => {
+      e.visible = i === index
+    })
     palletGroups.forEach((g, i) => {
-      // 平滑抬高：选中 0.06 米，其余落回 0
-      g.position.y = i === index ? 0.06 : 0
+      // 选中抬高 0.12 米，其余落回 0
+      g.position.y = i === index ? 0.12 : 0
     })
   }
 
@@ -779,6 +825,8 @@ export function mountBoxes(
         }
       })
       for (const d of disposables) d.dispose()
+      shadowTex?.dispose()
+      shadowTex = null
       wood.dispose()
       woodDark.dispose()
       ground.geometry.dispose()
