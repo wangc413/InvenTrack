@@ -149,6 +149,32 @@ button:active {
   margin-bottom: 2px;
 }
 
+/* 子页面右上角的「导出」按钮 */
+.topbar > .topbar-export {
+  order: 2;
+  margin-bottom: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 17px;
+  background: var(--fill);
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 500;
+  flex: 0 0 auto;
+}
+
+.topbar > .topbar-export:active {
+  background: var(--fill-strong);
+}
+
+.topbar > .topbar-export:disabled {
+  opacity: 0.4;
+}
+
 /* 带返回按钮的页面：返回键排到标题前面 */
 .topbar.back-mode > .icon-btn {
   order: 0;
@@ -2941,6 +2967,21 @@ textarea.input {
   text-align: center;
   font-size: 12px;
   color: var(--faint);
+}
+
+/* 列表行右侧的进入箭头 */
+.row-chevron {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+/* 独立表格页：占满整页，去掉卡片内边距和限高 */
+.ledger-table-page {
+  max-height: none;
+  margin: 0;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 4px;
 }
 
 /* ---------- 折叠表单列表（手风琴） ---------- */
