@@ -2899,6 +2899,7 @@ textarea.input {
 .ledger-table {
   max-height: 42vh;
   overflow-y: auto;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   margin: 0 -4px;
   border-radius: 8px;
@@ -2909,6 +2910,7 @@ textarea.input {
   border-collapse: collapse;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .ledger-table th {

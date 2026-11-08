@@ -187,16 +187,16 @@ export async function exportOutboundLedger(lines: ShipLine[], fileName: string) 
   ws.addRow(header)
   ws.getRow(2).font = { bold: true }
 
-  // 按 品名+生产日期 聚合，算累计出库；库存/结存留空由用户现场填
-  const agg = new Map<string, { prodDate: string; product: string; spec: string; out: number }>()
+  // 按 发货日期+品名+生产日期 聚合；库存/结存/备注 系统里没有，留空
+  const agg = new Map<string, { date: string; prodDate: string; product: string; spec: string; out: number }>()
   for (const l of lines) {
-    const key = `${l.product}|${l.prodDate}`
+    const key = `${l.date}|${l.product}|${l.prodDate}`
     const e = agg.get(key)
     if (e) e.out += l.boxes
-    else agg.set(key, { prodDate: l.prodDate, product: l.product, spec: l.spec, out: l.boxes })
+    else agg.set(key, { date: l.date, prodDate: l.prodDate, product: l.product, spec: l.spec, out: l.boxes })
   }
   for (const [, e] of agg) {
-    ws.addRow(['', e.prodDate, e.product, e.spec, '', e.out, '', ''])
+    ws.addRow([e.date, e.prodDate, e.product, e.spec, '', e.out, '', ''])
   }
 
   ws.columns.forEach((c, i) => {
@@ -222,7 +222,8 @@ export async function exportLoadingRecord(lines: ShipLine[], fileName: string) {
   ws.getRow(2).font = { bold: true }
 
   for (const l of lines) {
-    ws.addRow([l.date, l.customer, l.product, l.spec, l.prodDate, l.boxes, '', '良', '12个月', '', ''])
+    // 销售电话/车辆卫生情况/保质期/车牌号/装车温度：系统没有这些信息，留空
+    ws.addRow([l.date, l.customer, l.product, l.spec, l.prodDate, l.boxes, '', '', '', '', ''])
   }
 
   ws.columns.forEach((c, i) => {

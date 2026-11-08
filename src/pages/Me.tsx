@@ -129,10 +129,11 @@ export default function Me() {
 
   // —— 台账数据：从已发货订单派生 ——
   const shipLines: ShipLine[] = buildShipLines(db as unknown as Parameters<typeof buildShipLines>[0])
+  // 出库台账：按「发货日期 + 品名 + 生产日期」聚合（贴合 Excel 逐日流水形式）
   const outAgg = (() => {
     const agg = new Map<string, ShipLine & { total: number }>()
     for (const l of shipLines) {
-      const key = `${l.product}|${l.prodDate}`
+      const key = `${l.date}|${l.product}|${l.prodDate}`
       const e = agg.get(key)
       if (e) e.total += l.boxes
       else agg.set(key, { ...l, total: l.boxes })
@@ -185,19 +186,27 @@ export default function Me() {
               <table>
                 <thead>
                   <tr>
+                    <th>发货日期</th>
                     <th>生产日期</th>
                     <th>品名</th>
                     <th>规格</th>
-                    <th style={{ textAlign: 'right' }}>累计出库</th>
+                    <th style={{ textAlign: 'right' }}>库存数量</th>
+                    <th style={{ textAlign: 'right' }}>当日出库</th>
+                    <th style={{ textAlign: 'right' }}>结存</th>
+                    <th>备注</th>
                   </tr>
                 </thead>
                 <tbody>
                   {outAgg.map((e, i) => (
                     <tr key={i}>
+                      <td>{fmtDate(e.date)}</td>
                       <td>{fmtDate(e.prodDate)}</td>
                       <td>{e.product}</td>
                       <td>{e.spec}</td>
+                      <td style={{ textAlign: 'right' }}></td>
                       <td style={{ textAlign: 'right' }}>{e.total}</td>
+                      <td style={{ textAlign: 'right' }}></td>
+                      <td></td>
                     </tr>
                   ))}
                 </tbody>
@@ -243,9 +252,16 @@ export default function Me() {
                 <thead>
                   <tr>
                     <th>日期</th>
-                    <th>客户</th>
-                    <th>产品</th>
-                    <th style={{ textAlign: 'right' }}>数量</th>
+                    <th>客户名称</th>
+                    <th>产品名称</th>
+                    <th>规格</th>
+                    <th>生产日期</th>
+                    <th style={{ textAlign: 'right' }}>装车数量</th>
+                    <th>销售电话</th>
+                    <th>车辆卫生情况</th>
+                    <th>保质期</th>
+                    <th>车牌号</th>
+                    <th>装车温度</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -254,7 +270,14 @@ export default function Me() {
                       <td>{fmtDate(e.date)}</td>
                       <td>{e.customer}</td>
                       <td>{e.product}</td>
+                      <td>{e.spec}</td>
+                      <td>{fmtDate(e.prodDate)}</td>
                       <td style={{ textAlign: 'right' }}>{e.boxes}</td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
                     </tr>
                   ))}
                 </tbody>
