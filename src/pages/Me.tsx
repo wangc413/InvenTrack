@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { getState, importInbound, palletBoxes, replaceAll, resetAll, useDB, useStorageInfo, type DB } from '../lib/store'
 import { boxVolume, fmtDate } from '../lib/calc'
-import { toast } from '../components/UI'
+import { Icon, toast } from '../components/UI'
 import { buildShipLines, exportLoadingRecord, exportOutboundLedger, parseWorkbook, toInboundRows, type ShipLine } from '../lib/xlsx'
 
 function download(name: string, content: BlobPart, type: string) {
@@ -17,7 +17,7 @@ function download(name: string, content: BlobPart, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-type LedgerTab = 'out' | 'load'
+type LedgerKey = 'out' | 'load' | 'inbound'
 
 export default function Me() {
   const db = useDB()
@@ -26,7 +26,8 @@ export default function Me() {
   const [quota, setQuota] = useState({ usage: 0, quota: 0 })
   const jsonRef = useRef<HTMLInputElement>(null)
   const xlsxRef = useRef<HTMLInputElement>(null)
-  const [tab, setTab] = useState<LedgerTab>('out')
+  /** 当前展开的表（手风琴，一次只开一个），null 表示全部收起 */
+  const [open, setOpen] = useState<LedgerKey | null>(null)
   const [importing, setImporting] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
 
@@ -158,96 +159,129 @@ export default function Me() {
       </header>
 
       <main className="page">
-        {/* —— 台账（活表格，随发货自动填充）—— */}
+        {/* —— 台账（活表格，随发货自动填充；点击表名展开）—— */}
         <div className="sec-title">台账</div>
-        <div className="card card-pad">
-          <div className="ledger-tabs">
-            <button className={`ledger-tab ${tab === 'out' ? 'on' : ''}`} onClick={() => setTab('out')}>
-              出库台账
-            </button>
-            <button className={`ledger-tab ${tab === 'load' ? 'on' : ''}`} onClick={() => setTab('load')}>
-              装车记录
-            </button>
-          </div>
-
-          {shipLines.length === 0 ? (
-            <div className="empty" style={{ padding: '22px 8px' }}>
-              还没有已发车的记录。
-              <br />
-              装车页「确认发车」后，这里会自动生成台账。
-            </div>
-          ) : tab === 'out' ? (
-            <div className="ledger-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>生产日期</th>
-                    <th>品名</th>
-                    <th>规格</th>
-                    <th style={{ textAlign: 'right' }}>累计出库</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {outAgg.map((e, i) => (
-                    <tr key={i}>
-                      <td>{fmtDate(e.prodDate)}</td>
-                      <td>{e.product}</td>
-                      <td>{e.spec}</td>
-                      <td style={{ textAlign: 'right' }}>{e.total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="ledger-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th>客户</th>
-                    <th>产品</th>
-                    <th style={{ textAlign: 'right' }}>数量</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shipLines.map((e, i) => (
-                    <tr key={i}>
-                      <td>{fmtDate(e.date)}</td>
-                      <td>{e.customer}</td>
-                      <td>{e.product}</td>
-                      <td style={{ textAlign: 'right' }}>{e.boxes}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="ledger-actions">
-            <button
-              className="btn"
-              onClick={() => {
-                if (tab === 'out') exportOutboundLedger(shipLines, `出库台账-${dateStr}.xlsx`)
-                else exportLoadingRecord(shipLines, `装车记录-${dateStr}.xlsx`)
-              }}
-              disabled={shipLines.length === 0}
-            >
-              导出 {tab === 'out' ? '出库台账' : '装车记录'}（Excel）
-            </button>
-            <span className="ledger-hint">只统计已发车的车次</span>
-          </div>
-        </div>
-
-        {/* —— 入库导入 —— */}
-        <div className="sec-title">入库导入</div>
         <div className="card">
-          <div className="row" onClick={() => !importing && xlsxRef.current?.click()}>
-            <div className="grow">
-              <div className="name">{importing ? '正在解析…' : '导入 Excel 加库存'}</div>
-              <div className="meta">支持「入库登记表 / 出库台账 / 装车记录」，按品名匹配，没有就自动新建</div>
-            </div>
-            <span className="tag">件=箱</span>
+          {/* 出库台账 */}
+          <div className="acc-item">
+            <button className="acc-head" onClick={() => setOpen(open === 'out' ? null : 'out')}>
+              <span className="acc-title">出库台账</span>
+              <span className="acc-meta">{outAgg.length > 0 ? `${outAgg.length} 项` : '暂无'}</span>
+              <Icon name="chevron" size={16} className={`acc-arrow ${open === 'out' ? 'open' : ''}`} />
+            </button>
+            {open === 'out' && (
+              <div className="acc-body">
+                {shipLines.length === 0 ? (
+                  <div className="empty" style={{ padding: '18px 8px' }}>
+                    还没有已发车的记录。
+                    <br />
+                    装车页「确认发车」后，这里会自动生成台账。
+                  </div>
+                ) : (
+                  <>
+                    <div className="ledger-table">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>生产日期</th>
+                            <th>品名</th>
+                            <th>规格</th>
+                            <th style={{ textAlign: 'right' }}>累计出库</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {outAgg.map((e, i) => (
+                            <tr key={i}>
+                              <td>{fmtDate(e.prodDate)}</td>
+                              <td>{e.product}</td>
+                              <td>{e.spec}</td>
+                              <td style={{ textAlign: 'right' }}>{e.total}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="ledger-actions">
+                      <button className="btn" onClick={() => exportOutboundLedger(shipLines, `出库台账-${dateStr}.xlsx`)}>
+                        导出出库台账（Excel）
+                      </button>
+                      <span className="ledger-hint">只统计已发车的车次</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 装车记录 */}
+          <div className="acc-item">
+            <button className="acc-head" onClick={() => setOpen(open === 'load' ? null : 'load')}>
+              <span className="acc-title">装车记录</span>
+              <span className="acc-meta">{shipLines.length > 0 ? `${shipLines.length} 条` : '暂无'}</span>
+              <Icon name="chevron" size={16} className={`acc-arrow ${open === 'load' ? 'open' : ''}`} />
+            </button>
+            {open === 'load' && (
+              <div className="acc-body">
+                {shipLines.length === 0 ? (
+                  <div className="empty" style={{ padding: '18px 8px' }}>
+                    还没有已发车的记录。
+                    <br />
+                    装车页「确认发车」后，这里会自动生成装车记录。
+                  </div>
+                ) : (
+                  <>
+                    <div className="ledger-table">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>日期</th>
+                            <th>客户</th>
+                            <th>产品</th>
+                            <th style={{ textAlign: 'right' }}>数量</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {shipLines.map((e, i) => (
+                            <tr key={i}>
+                              <td>{fmtDate(e.date)}</td>
+                              <td>{e.customer}</td>
+                              <td>{e.product}</td>
+                              <td style={{ textAlign: 'right' }}>{e.boxes}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="ledger-actions">
+                      <button className="btn" onClick={() => exportLoadingRecord(shipLines, `装车记录-${dateStr}.xlsx`)}>
+                        导出装车记录（Excel）
+                      </button>
+                      <span className="ledger-hint">只统计已发车的车次</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 入库登记表（导入） */}
+          <div className="acc-item">
+            <button className="acc-head" onClick={() => setOpen(open === 'inbound' ? null : 'inbound')}>
+              <span className="acc-title">入库登记表</span>
+              <span className="acc-meta">导入加库存</span>
+              <Icon name="chevron" size={16} className={`acc-arrow ${open === 'inbound' ? 'open' : ''}`} />
+            </button>
+            {open === 'inbound' && (
+              <div className="acc-body">
+                <div className="row row-plain" onClick={() => !importing && xlsxRef.current?.click()}>
+                  <div className="grow">
+                    <div className="name">{importing ? '正在解析…' : '导入 Excel 加库存'}</div>
+                    <div className="meta">支持「入库登记表 / 出库台账 / 装车记录」，按品名匹配，没有就自动新建</div>
+                  </div>
+                  <span className="tag">件=箱</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
