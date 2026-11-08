@@ -1710,13 +1710,65 @@ textarea.input {
   backdrop-filter: blur(18px);
 }
 
-.viewer-info > div {
+.viewer-rows {
+  max-height: 42vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.viewer-row {
   display: grid;
-  grid-template-columns: 1fr 62px 64px;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 6px;
-  padding: 5px 0;
+  gap: 8px;
+  padding: 6px 0;
   font-size: 13px;
+  color: var(--text);
+}
+
+.viewer-row-main {
+  min-width: 0;
+}
+
+.viewer-row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.viewer-row-no {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-row-sub {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-row-boxes {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  flex: 0 0 auto;
   color: var(--text);
 }
 
@@ -1739,6 +1791,10 @@ textarea.input {
   border-top: 0.5px solid var(--line);
   margin-top: 4px;
   padding-top: 8px !important;
+  display: grid;
+  grid-template-columns: 1fr 62px 64px;
+  align-items: center;
+  gap: 6px;
 }
 
 .viewer-total span {

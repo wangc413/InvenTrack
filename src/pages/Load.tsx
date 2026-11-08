@@ -891,13 +891,26 @@ export function Viewer3D({
       </div>
       <Box3D pallets={spec} />
       <div className="viewer-info">
-        {sum.lines.slice(0, 4).map((l) => (
-          <div key={`${l.sku.id}-${l.prodDate}`}>
-            <span>{nickOf(l.sku)}</span>
-            <em>{fmtDate(l.prodDate)}</em>
-            <b>{l.boxes} 箱</b>
-          </div>
-        ))}
+        <div className="viewer-rows">
+          {order.pallets.map((p) => {
+            const sku = db.skus.find((s) => s.id === p.skuId)
+            const boxes = palletBoxes(p)
+            return (
+              <div key={p.id} className="viewer-row">
+                <div className="viewer-row-main">
+                  <span className="viewer-row-name">
+                    <i className="viewer-row-no">{palletName(p.no)}</i>
+                    <span>{sku ? nickOf(sku) : '品项已删除'}</span>
+                  </span>
+                  <em className="viewer-row-sub">
+                    {fmtDate(p.prodDate)} · {fmtTime(p.createdAt)} 上车
+                  </em>
+                </div>
+                <span className="viewer-row-boxes">{boxes} 箱</span>
+              </div>
+            )
+          })}
+        </div>
         <div className="viewer-total">
           <span>合计</span>
           <em>{fmt(sum.totalVolume, 2)} m³</em>
