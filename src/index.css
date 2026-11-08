@@ -1718,14 +1718,104 @@ textarea.input {
   padding: 0 4px;
 }
 
+/* 点 3D 里某块板后，底部浮出的单板详情卡 */
+.viewer-pick {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--fill);
+  margin-bottom: 8px;
+}
+
+.viewer-pick-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.viewer-pick-no {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-pick-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.viewer-pick-boxes {
+  flex: 0 0 auto;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-pick-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 还没点板时的引导提示 */
+.viewer-hint-row {
+  padding: 8px 2px;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+
+/* 展开/收起全部板明细的开关 */
+.viewer-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 2px;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  color: var(--sub);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.viewer-toggle svg {
+  transition: transform 0.18s ease;
+}
+
+.viewer-toggle svg.flip {
+  transform: rotate(180deg);
+}
+
 .viewer-row {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
+  padding: 6px 4px;
   font-size: 13px;
   color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.viewer-row:active {
+  background: var(--fill);
+}
+
+.viewer-row.active {
+  background: var(--fill);
 }
 
 .viewer-row-main {

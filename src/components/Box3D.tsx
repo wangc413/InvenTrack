@@ -9,11 +9,17 @@ export default function Box3D({
   pallets,
   compact = false,
   emptyPallet = false,
+  selected = -1,
+  onPick,
 }: {
   pallets: PalletSpec[]
   compact?: boolean
   /** 没有货时也画一块空托盘，告诉用户货往哪儿放 */
   emptyPallet?: boolean
+  /** 高亮的板索引（-1 无） */
+  selected?: number
+  /** 点中某块板时回调 */
+  onPick?: (index: number) => void
 }) {
   const holder = useRef<HTMLDivElement>(null)
   const scene = useRef<SceneHandle | null>(null)
@@ -21,6 +27,8 @@ export default function Box3D({
   /** 场景是异步加载的，加载期间数据可能已经变了，这里始终拿最新的 */
   const latest = useRef(pallets)
   latest.current = pallets
+  const onPickRef = useRef(onPick)
+  onPickRef.current = onPick
 
   const sig = pallets.map((p) => `${p.sku.id}:${p.layers}:${p.perLayer}:${p.topCount}`).join('|')
 
@@ -34,7 +42,10 @@ export default function Box3D({
       try {
         const { mountBoxes } = await import('../lib/box3d')
         if (cancelled || !holder.current) return
-        scene.current = mountBoxes(holder.current, latest.current, { emptyPallet })
+        scene.current = mountBoxes(holder.current, latest.current, {
+          emptyPallet,
+          onPick: (i) => onPickRef.current?.(i),
+        })
       } catch {
         if (!cancelled) setFailed(true)
       }
@@ -54,6 +65,11 @@ export default function Box3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig])
 
+  // 选中高亮跟着父组件走
+  useEffect(() => {
+    scene.current?.select(selected)
+  }, [selected, sig])
+
   return (
     <div className={`box3d ${compact ? 'compact' : ''}`}>
       <div ref={holder} className="box3d-stage" />
@@ -63,7 +79,7 @@ export default function Box3D({
           <button className="box3d-reset" onClick={() => scene.current?.resetView()} aria-label="重置视角">
             重置视角
           </button>
-          <div className="box3d-hint">拖动旋转 · 双指缩放</div>
+          <div className="box3d-hint">拖动旋转 · 双指缩放 · 点板看明细</div>
         </>
       )}
     </div>

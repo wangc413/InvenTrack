@@ -168,9 +168,14 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M5 12.5 10 17.5 19 7" />
     </>
   ),
+  chevron: (
+    <>
+      <path d="m6 9 6 6 6-6" />
+    </>
+  ),
 }
 
-export function Icon({ name, size = 20 }: { name: string; size?: number }) {
+export function Icon({ name, size = 20, className }: { name: string; size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -182,6 +187,7 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      className={className}
     >
       {ICONS[name]}
     </svg>

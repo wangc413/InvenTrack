@@ -65,6 +65,8 @@ export type SceneHandle = {
   /** 换一批板 / 改层数，只重排箱子，不重建 WebGL 场景 */
   setPallets: (pallets: PalletSpec[]) => void
   resetView: () => void
+  /** 选中高亮某块板（-1 取消）；只改视觉，不影响数据 */
+  select: (index: number) => void
   dispose: () => void
 }
 
@@ -369,7 +371,7 @@ function makePalletMesh(palletL: number, palletW: number, wood: THREE.Material, 
 export function mountBoxes(
   container: HTMLElement,
   pallets: PalletSpec[],
-  opts: { emptyPallet?: boolean } = {},
+  opts: { emptyPallet?: boolean; onPick?: (index: number) => void } = {},
 ): SceneHandle {
   const scene = new THREE.Scene()
 
@@ -544,10 +546,19 @@ export function mountBoxes(
 
   /* ---------- 摆箱子 ---------- */
 
+  /** 每块板的 group，按索引对应；点击拾取和选中高亮都靠它 */
+  const palletGroups: THREE.Group[] = []
+  /** 每块板的高亮线框，选中时才显示 */
+  const highlights: THREE.LineSegments[] = []
+  let selectedIdx = -1
+
   function clearRoot() {
     for (const d of transient) d.dispose()
     transient = []
     root.clear()
+    palletGroups.length = 0
+    highlights.length = 0
+    selectedIdx = -1
   }
 
   function build(list: PalletSpec[]) {
@@ -584,6 +595,7 @@ export function mountBoxes(
       idx++
 
       const group = new THREE.Group()
+      group.userData.palletIndex = idx - 1
       group.position.x = -totalW / 2 + col * (palletL + gap) + palletL / 2
       group.position.z = -totalD / 2 + row * (palletW + gap) + palletW / 2
       root.add(group)
@@ -613,6 +625,16 @@ export function mountBoxes(
           group.add(box)
         }
       }
+
+      // 高亮线框：选中的板描一圈醒目的边，一眼看出点的是哪块
+      const hl = new THREE.Box3Helper(new THREE.Box3(), 0xff4d4f)
+      hl.visible = false
+      hl.material.transparent = true
+      hl.material.opacity = 0.9
+      hl.material.depthTest = false
+      group.add(hl)
+      highlights.push(hl)
+      palletGroups.push(group)
     }
 
     // 相机按实际包围盒 + 当前画布比例取景，保证整垛（不管几层）都在画面里
@@ -621,6 +643,15 @@ export function mountBoxes(
       bbox.getCenter(center)
       bbox.getSize(size)
       frameBounds()
+    }
+
+    // 摆完箱子后，把每块板的高亮线框更新到实际包围盒
+    for (const hl of highlights) {
+      hl.box.setFromObject(hl.parent as THREE.Object3D)
+    }
+    if (selectedIdx >= 0) {
+      highlights[selectedIdx]?.box.setFromObject(palletGroups[selectedIdx])
+      highlights[selectedIdx].visible = true
     }
   }
 
@@ -648,6 +679,69 @@ export function mountBoxes(
   const ro = new ResizeObserver(resize)
   ro.observe(container)
 
+  /** 选中高亮某块板，-1 取消高亮 */
+  function select(index: number) {
+    selectedIdx = index
+    highlights.forEach((hl, i) => {
+      if (i === index) {
+        hl.box.setFromObject(palletGroups[i])
+        hl.visible = true
+      } else {
+        hl.visible = false
+      }
+    })
+  }
+
+  /* ---------- 点击拾取：点某块板 → 回调选中 ---------- */
+
+  if (opts.onPick) {
+    const raycaster = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
+    let downX = 0
+    let downY = 0
+    let downTime = 0
+
+    const onPointerDown = (e: PointerEvent) => {
+      downX = e.clientX
+      downY = e.clientY
+      downTime = performance.now()
+    }
+    const onPointerUp = (e: PointerEvent) => {
+      // 位移大 = 在拖动旋转；时间久 = 长按；都不是，才算是「点一下」
+      const dx = e.clientX - downX
+      const dy = e.clientY - downY
+      if (Math.hypot(dx, dy) > 6 || performance.now() - downTime > 400) return
+
+      const rect = renderer.domElement.getBoundingClientRect()
+      ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
+      raycaster.setFromCamera(ndc, camera)
+      const hits = raycaster.intersectObjects(palletGroups, true)
+      if (hits.length > 0) {
+        // 命中的是箱子/托盘，往上找属于哪块板（group 上挂了 palletIndex）
+        let obj: THREE.Object3D | null = hits[0].object
+        let gi: number | undefined
+        while (obj) {
+          const idx = (obj as THREE.Group).userData.palletIndex
+          if (typeof idx === 'number') {
+            gi = idx
+            break
+          }
+          obj = obj.parent
+        }
+        if (gi !== undefined) opts.onPick!(gi)
+      }
+    }
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('pointerup', onPointerUp)
+    disposables.push({
+      dispose: () => {
+        renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+        renderer.domElement.removeEventListener('pointerup', onPointerUp)
+      },
+    })
+  }
+
   let raf = 0
   let stopped = false
   const loop = () => {
@@ -672,6 +766,7 @@ export function mountBoxes(
       camDir.copy(VIEW_DIR)
       fit()
     },
+    select,
     dispose() {
       stopped = true
       cancelAnimationFrame(raf)

@@ -871,10 +871,23 @@ export function Viewer3D({
   actions?: ReactNode
 }) {
   const db = useDB()
+  /** 选中的板索引（-1 无），点击 3D 里的板或列表项切换 */
+  const [selected, setSelected] = useState(-1)
+  /** 逐板明细列表是否展开 */
+  const [expanded, setExpanded] = useState(false)
+  // 换一趟车（order 变了）就重置选中和展开
+  const orderKey = order?.id ?? ''
+  useEffect(() => {
+    setSelected(-1)
+    setExpanded(false)
+  }, [orderKey])
   if (!open || !order) return null
   const spec = specOfOrder(db, order)
   const sum = summarize(db, order)
   const customer = customerById(db, order.customerId)
+  const sel = order.pallets[selected] ?? null
+  const selSku = sel ? db.skus.find((s) => s.id === sel.skuId) : null
+  const selBoxes = sel ? palletBoxes(sel) : 0
 
   return (
     <div className="viewer">
@@ -889,28 +902,57 @@ export function Viewer3D({
           </em>
         </div>
       </div>
-      <Box3D pallets={spec} />
+      <Box3D pallets={spec} selected={selected} onPick={setSelected} />
       <div className="viewer-info">
-        <div className="viewer-rows">
-          {order.pallets.map((p) => {
-            const sku = db.skus.find((s) => s.id === p.skuId)
-            const boxes = palletBoxes(p)
-            return (
-              <div key={p.id} className="viewer-row">
-                <div className="viewer-row-main">
-                  <span className="viewer-row-name">
-                    <i className="viewer-row-no">{palletName(p.no)}</i>
-                    <span>{sku ? nickOf(sku) : '品项已删除'}</span>
-                  </span>
-                  <em className="viewer-row-sub">
-                    {fmtDate(p.prodDate)} · {fmtTime(p.createdAt)} 上车
-                  </em>
+        {sel ? (
+          <div className="viewer-pick">
+            <div className="viewer-pick-head">
+              <span className="viewer-pick-no">{palletName(sel.no)}</span>
+              <span className="viewer-pick-name">{selSku ? nickOf(selSku) : '品项已删除'}</span>
+              <b className="viewer-pick-boxes">{selBoxes} 箱</b>
+            </div>
+            <div className="viewer-pick-meta">
+              <span>生产日期 {fmtDate(sel.prodDate)}</span>
+              <span>上车 {fmtTime(sel.createdAt)}</span>
+              <span>{layerExpr(sel.layers, sel.perLayer, sel.topCount)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="viewer-hint-row">点 3D 图里的某一板，看它的箱数、生产日期和上车时间</div>
+        )}
+
+        <button className="viewer-toggle" onClick={() => setExpanded((v) => !v)}>
+          <span>{expanded ? '收起' : '展开'}全部 {order.pallets.length} 板明细</span>
+          <Icon name="chevron" size={16} className={expanded ? 'flip' : ''} />
+        </button>
+
+        {expanded && (
+          <div className="viewer-rows">
+            {order.pallets.map((p, i) => {
+              const sku = db.skus.find((s) => s.id === p.skuId)
+              const boxes = palletBoxes(p)
+              return (
+                <div
+                  key={p.id}
+                  className={`viewer-row${i === selected ? ' active' : ''}`}
+                  onClick={() => setSelected(i)}
+                >
+                  <div className="viewer-row-main">
+                    <span className="viewer-row-name">
+                      <i className="viewer-row-no">{palletName(p.no)}</i>
+                      <span>{sku ? nickOf(sku) : '品项已删除'}</span>
+                    </span>
+                    <em className="viewer-row-sub">
+                      {fmtDate(p.prodDate)} · {fmtTime(p.createdAt)} 上车
+                    </em>
+                  </div>
+                  <span className="viewer-row-boxes">{boxes} 箱</span>
                 </div>
-                <span className="viewer-row-boxes">{boxes} 箱</span>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )}
+
         <div className="viewer-total">
           <span>合计</span>
           <em>{fmt(sum.totalVolume, 2)} m³</em>
