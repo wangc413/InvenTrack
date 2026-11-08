@@ -550,8 +550,6 @@ export function mountBoxes(
   const palletGroups: THREE.Group[] = []
   /** 每块板的悬浮投影（地面虚化阴影，选中时才显示） */
   const highlights: THREE.Mesh[] = []
-  /** 每块板的描边轮廓（选中时才显示） */
-  const outlines: THREE.LineSegments[] = []
   /** 共享的投影纹理，只生成一次 */
   let shadowTex: THREE.CanvasTexture | null = null
   let selectedIdx = -1
@@ -583,7 +581,6 @@ export function mountBoxes(
     root.clear()
     palletGroups.length = 0
     highlights.length = 0
-    outlines.length = 0
     selectedIdx = -1
   }
 
@@ -669,22 +666,6 @@ export function mountBoxes(
       transient.push(hlGeo, hlMat)
       highlights.push(hl)
 
-      // 描边轮廓：紧贴整块板（托盘+箱子堆）外沿的一圈亮蓝边，选中时显示，和纸箱形成强对比
-      const edgeH = Math.max(0.42, (p.layers * p.sku.boxH + PALLET_H) * MM)
-      const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(palletL * 1.02, edgeH, palletW * 1.02))
-      const edgeMat = new THREE.LineBasicMaterial({
-        color: 0x2f7cff,
-        transparent: true,
-        opacity: 0.95,
-        depthTest: true,
-      })
-      const edge = new THREE.LineSegments(edgeGeo, edgeMat)
-      edge.position.y = edgeH / 2
-      edge.visible = false
-      group.add(edge)
-      transient.push(edgeGeo, edgeMat)
-      outlines.push(edge)
-
       palletGroups.push(group)
     }
 
@@ -721,14 +702,11 @@ export function mountBoxes(
   const ro = new ResizeObserver(resize)
   ro.observe(container)
 
-  /** 选中高亮某块板，-1 取消：选中的板整体抬高 + 投影 + 描边，一眼认出是哪块 */
+  /** 选中高亮某块板，-1 取消：选中的板整体抬高 + 投影，一眼认出是哪块 */
   function select(index: number) {
     selectedIdx = index
     highlights.forEach((hl, i) => {
       hl.visible = i === index
-    })
-    outlines.forEach((e, i) => {
-      e.visible = i === index
     })
     palletGroups.forEach((g, i) => {
       // 选中抬高 0.12 米，其余落回 0
