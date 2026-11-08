@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
-import { getState, palletBoxes, replaceAll, resetAll, useDB, useStorageInfo, type DB } from '../lib/store'
-import { boxVolume } from '../lib/calc'
+import { getState, importInbound, palletBoxes, replaceAll, resetAll, useDB, useStorageInfo, type DB } from '../lib/store'
+import { boxVolume, fmtDate } from '../lib/calc'
 import { toast } from '../components/UI'
+import { buildShipLines, exportLoadingRecord, exportOutboundLedger, parseWorkbook, toInboundRows, type ShipLine } from '../lib/xlsx'
 
 function download(name: string, content: BlobPart, type: string) {
   const blob = new Blob([content], { type })
@@ -16,12 +17,17 @@ function download(name: string, content: BlobPart, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+type LedgerTab = 'out' | 'load'
+
 export default function Me() {
   const db = useDB()
   const info = useStorageInfo()
   const [qr, setQr] = useState('')
   const [quota, setQuota] = useState({ usage: 0, quota: 0 })
-  const fileRef = useRef<HTMLInputElement>(null)
+  const jsonRef = useRef<HTMLInputElement>(null)
+  const xlsxRef = useRef<HTMLInputElement>(null)
+  const [tab, setTab] = useState<LedgerTab>('out')
+  const [importing, setImporting] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
 
   useEffect(() => {
@@ -49,37 +55,6 @@ export default function Me() {
   const exportJson = () => {
     download(`发货助手备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(getState(), null, 2), 'application/json')
     toast('备份已导出')
-  }
-
-  const exportCsv = () => {
-    const rows: string[][] = [
-      ['发货单号', '日期', '收货地', '收货方', '拖板号', '品名', '规格', '生产日期', '箱数', '件数', '体积m3', '重量kg'],
-    ]
-    for (const o of db.orders) {
-      const customer = db.customers.find((c) => c.id === o.customerId)
-      for (const p of o.pallets) {
-        const sku = db.skus.find((s) => s.id === p.skuId)
-        if (!sku) continue
-        const boxes = palletBoxes(p)
-        rows.push([
-          o.no,
-          new Date(o.createdAt).toLocaleDateString('zh-CN'),
-          o.destination,
-          customer?.name ?? '',
-          p.no,
-          sku.name,
-          sku.spec,
-          p.prodDate,
-          String(boxes),
-          String(boxes * sku.perBox),
-          (boxes * boxVolume(sku)).toFixed(3),
-          String(boxes * sku.boxWeight),
-        ])
-      }
-    }
-    const csv = '\ufeff' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
-    download(`发货明细-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
-    toast('明细已导出，可用 Excel 打开')
   }
 
   const exportMoves = () => {
@@ -116,12 +91,53 @@ export default function Me() {
     }
   }
 
+  const importXlsx = async (file: File) => {
+    setImporting(true)
+    try {
+      const buf = await file.arrayBuffer()
+      const parsed = await parseWorkbook(buf)
+      const rows = toInboundRows(parsed.kind, parsed.rows)
+      if (rows.length === 0) {
+        toast('没读到有效数据，请确认表里有「品名 + 生产日期 + 数量」这几列')
+        return
+      }
+      const kindLabel = parsed.kind === 'inbound' ? '入库登记表' : parsed.kind === 'outbound' ? '出库台账' : '装车记录'
+      if (parsed.kind !== 'inbound') {
+        // 出库/装车表也当入库数据加库存（件=箱），因为用户说三份表本质是同一份数据
+        if (!confirm(`识别为「${kindLabel}」，将按「件=箱」把 ${rows.length} 行加入库存。继续？`)) return
+      } else {
+        if (!confirm(`识别为「${kindLabel}」，将把 ${rows.length} 行加入库存。继续？`)) return
+      }
+      const r = importInbound(rows.map((x) => ({ name: x.name, spec: x.spec, qty: x.qty, prodDate: x.prodDate, date: x.date })))
+      toast(`已入库 ${r.added} 行${r.skusCreated > 0 ? `，新建 ${r.skusCreated} 个品项` : ''}${r.skipped > 0 ? `，跳过 ${r.skipped} 行` : ''}`)
+    } catch (e) {
+      toast('解析失败，请确认是 .xlsx 文件')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const clearAll = () => {
     if (confirm('清空本机所有品项、库存和发货单？此操作不可撤销，建议先导出备份。')) {
       resetAll()
       toast('已恢复初始状态')
     }
   }
+
+  // —— 台账数据：从已发货订单派生 ——
+  const shipLines: ShipLine[] = buildShipLines(db as unknown as Parameters<typeof buildShipLines>[0])
+  const outAgg = (() => {
+    const agg = new Map<string, ShipLine & { total: number }>()
+    for (const l of shipLines) {
+      const key = `${l.product}|${l.prodDate}`
+      const e = agg.get(key)
+      if (e) e.total += l.boxes
+      else agg.set(key, { ...l, total: l.boxes })
+    }
+    return [...agg.values()]
+  })()
+
+  const dateStr = new Date().toISOString().slice(0, 10)
 
   const dataSize = new Blob([JSON.stringify(getState())]).size
   const pallets = db.orders.reduce((n, o) => n + o.pallets.length, 0)
@@ -136,12 +152,164 @@ export default function Me() {
     <>
       <header className="topbar">
         <div style={{ flex: 1 }}>
-          <h1>我的</h1>
-          <div className="sub">数据存在这台手机上</div>
+          <h1>数据中心</h1>
+          <div className="sub">台账 · 导入导出</div>
         </div>
       </header>
 
       <main className="page">
+        {/* —— 台账（活表格，随发货自动填充）—— */}
+        <div className="sec-title">台账</div>
+        <div className="card card-pad">
+          <div className="ledger-tabs">
+            <button className={`ledger-tab ${tab === 'out' ? 'on' : ''}`} onClick={() => setTab('out')}>
+              出库台账
+            </button>
+            <button className={`ledger-tab ${tab === 'load' ? 'on' : ''}`} onClick={() => setTab('load')}>
+              装车记录
+            </button>
+          </div>
+
+          {shipLines.length === 0 ? (
+            <div className="empty" style={{ padding: '22px 8px' }}>
+              还没有已发车的记录。
+              <br />
+              装车页「确认发车」后，这里会自动生成台账。
+            </div>
+          ) : tab === 'out' ? (
+            <div className="ledger-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>生产日期</th>
+                    <th>品名</th>
+                    <th>规格</th>
+                    <th style={{ textAlign: 'right' }}>累计出库</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {outAgg.map((e, i) => (
+                    <tr key={i}>
+                      <td>{fmtDate(e.prodDate)}</td>
+                      <td>{e.product}</td>
+                      <td>{e.spec}</td>
+                      <td style={{ textAlign: 'right' }}>{e.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="ledger-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>客户</th>
+                    <th>产品</th>
+                    <th style={{ textAlign: 'right' }}>数量</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shipLines.map((e, i) => (
+                    <tr key={i}>
+                      <td>{fmtDate(e.date)}</td>
+                      <td>{e.customer}</td>
+                      <td>{e.product}</td>
+                      <td style={{ textAlign: 'right' }}>{e.boxes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="ledger-actions">
+            <button
+              className="btn"
+              onClick={() => {
+                if (tab === 'out') exportOutboundLedger(shipLines, `出库台账-${dateStr}.xlsx`)
+                else exportLoadingRecord(shipLines, `装车记录-${dateStr}.xlsx`)
+              }}
+              disabled={shipLines.length === 0}
+            >
+              导出 {tab === 'out' ? '出库台账' : '装车记录'}（Excel）
+            </button>
+            <span className="ledger-hint">只统计已发车的车次</span>
+          </div>
+        </div>
+
+        {/* —— 入库导入 —— */}
+        <div className="sec-title">入库导入</div>
+        <div className="card">
+          <div className="row" onClick={() => !importing && xlsxRef.current?.click()}>
+            <div className="grow">
+              <div className="name">{importing ? '正在解析…' : '导入 Excel 加库存'}</div>
+              <div className="meta">支持「入库登记表 / 出库台账 / 装车记录」，按品名匹配，没有就自动新建</div>
+            </div>
+            <span className="tag">件=箱</span>
+          </div>
+        </div>
+
+        <input
+          ref={xlsxRef}
+          type="file"
+          accept=".xlsx,.xls"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) importXlsx(f)
+            e.target.value = ''
+          }}
+        />
+
+        {/* —— 备份 —— */}
+        <div className="sec-title">备份</div>
+        <div className="card">
+          <div className="row" onClick={exportJson}>
+            <div className="grow">
+              <div className="name">导出备份</div>
+              <div className="meta">JSON 文件，换手机或发给同事用</div>
+            </div>
+            <span className="tag">{(dataSize / 1024).toFixed(0)} KB</span>
+          </div>
+          <div className="row" onClick={() => jsonRef.current?.click()}>
+            <div className="grow">
+              <div className="name">导入备份</div>
+              <div className="meta">用别人的备份文件覆盖本机</div>
+            </div>
+          </div>
+          <div className="row" onClick={exportMoves}>
+            <div className="grow">
+              <div className="name">导出库存流水</div>
+              <div className="meta">每一笔入库、发车、退货、盘点，用来对账</div>
+            </div>
+            <span className="tag">{db.moves.length} 条</span>
+          </div>
+          <div className="row" onClick={clearAll}>
+            <div className="grow">
+              <div className="name" style={{ color: 'var(--danger)' }}>
+                清空本机数据
+              </div>
+              <div className="meta">不可撤销</div>
+            </div>
+          </div>
+        </div>
+
+        <input
+          ref={jsonRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) importJson(f)
+            e.target.value = ''
+          }}
+        />
+
+        {/* —— 二维码试用 —— */}
+        <div className="sec-title">分享</div>
         <div className="card card-pad" style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.3px', marginBottom: 5 }}>扫这个码，别人就能试用</div>
           <div style={{ fontSize: 13, color: 'var(--sub)', marginBottom: 16 }}>
@@ -162,44 +330,7 @@ export default function Me() {
           </div>
         </div>
 
-        <div className="sec-title">数据</div>
-        <div className="card">
-          <div className="row" onClick={exportJson}>
-            <div className="grow">
-              <div className="name">导出备份</div>
-              <div className="meta">JSON 文件，换手机或发给同事用</div>
-            </div>
-            <span className="tag">{(dataSize / 1024).toFixed(0)} KB</span>
-          </div>
-          <div className="row" onClick={() => fileRef.current?.click()}>
-            <div className="grow">
-              <div className="name">导入备份</div>
-              <div className="meta">用别人的备份文件覆盖本机</div>
-            </div>
-          </div>
-          <div className="row" onClick={exportCsv}>
-            <div className="grow">
-              <div className="name">导出发货明细</div>
-              <div className="meta">CSV，Excel 可直接打开</div>
-            </div>
-          </div>
-          <div className="row" onClick={exportMoves}>
-            <div className="grow">
-              <div className="name">导出库存流水</div>
-              <div className="meta">每一笔入库、发车、退货、盘点，用来对账</div>
-            </div>
-            <span className="tag">{db.moves.length} 条</span>
-          </div>
-          <div className="row" onClick={clearAll}>
-            <div className="grow">
-              <div className="name" style={{ color: 'var(--danger)' }}>
-                清空本机数据
-              </div>
-              <div className="meta">不可撤销</div>
-            </div>
-          </div>
-        </div>
-
+        {/* —— 容量 —— */}
         <div className="sec-title">容量</div>
         <div className="card card-pad">
           <div className="cap-head">
@@ -242,35 +373,6 @@ export default function Me() {
               ? '数据存在浏览器数据库里，容量按手机剩余空间分配，不再是 5 MB 上限。'
               : '当前是缓存模式，上限约 5 MB，容量偏紧，请多导出备份。'}
           </div>
-
-          <div className="cap-sub" style={{ marginTop: 6 }}>
-            长期保留：{info.persisted ? '已开启，系统不会主动清理' : '未开启，加个「添加到主屏幕」更容易获批'}
-          </div>
-        </div>
-
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json,.json"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) importJson(f)
-            e.target.value = ''
-          }}
-        />
-
-        <div className="sec-title">说明</div>
-        <div className="card card-pad" style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--sub)' }}>
-          <p style={{ margin: '0 0 10px' }}>
-            这是一个纯网页应用（PWA），不装 App、不走应用商店。数据和记录都保存在当前手机浏览器里，不会上传到任何服务器。
-          </p>
-          <p style={{ margin: '0 0 10px' }}>
-            <b style={{ color: 'var(--text)' }}>换手机、清缓存、换浏览器都会读不到旧数据</b>，所以重要数据请定期「导出备份」。
-          </p>
-          <p style={{ margin: 0 }}>
-            你和同事各自扫码打开，是各自独立的一份数据。要多人实时共享同一份库存，需要额外接一个后端。
-          </p>
         </div>
       </main>
     </>

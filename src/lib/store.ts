@@ -864,6 +864,101 @@ export function addBatch(input: { skuId: string; qty: number; prodDate: string; 
   return batch.id
 }
 
+/** 从 Excel 入库表导入的一行 */
+export type InboundRow = {
+  /** 品名（按它匹配 sku，匹配不到就新建） */
+  name: string
+  /** 规格，如 1*800g*10袋 */
+  spec: string
+  /** 数量（件=箱，直接当箱数） */
+  qty: number
+  /** 生产日期 YYYY-MM-DD */
+  prodDate: string
+  /** 入库日期（原表的「日期」列，仅展示用，不参与库存） */
+  date?: string
+}
+
+/**
+ * 批量导入入库：按品名匹配已有 sku（同名就复用），没有则新建一个最简 sku；
+ * 每一行按「品名 + 生产日期」建/补一个批次，并记一条入账流水。
+ * 全部在一个 commit 里完成，避免逐行提交刷屏。
+ */
+export function importInbound(rows: InboundRow[]): { added: number; skusCreated: number; skipped: number } {
+  let skusCreated = 0
+  let added = 0
+  let skipped = 0
+
+  // 先在当前 skus 上做一层「同名缓存」，同名品项只建一次
+  const nameIndex = new Map<string, string>() // name(小写去空格) -> skuId
+  for (const s of state.skus) nameIndex.set(normName(s.name), s.id)
+
+  let nextSkus = state.skus
+  let nextBatches = state.batches
+  let nextMoves = state.moves
+
+  const push = (m: Omit<Move, 'id' | 'at'>) => {
+    nextMoves = [{ ...m, id: uid(), at: Date.now() }, ...nextMoves]
+  }
+
+  for (const r of rows) {
+    if (!(r.qty > 0)) {
+      skipped++
+      continue
+    }
+    const key = normName(r.name)
+    let skuId = nameIndex.get(key)
+    if (!skuId) {
+      // 新建一个最简 sku，规格取导入的规格，其余用默认值
+      const sku: Sku = {
+        id: uid(),
+        code: '',
+        name: r.name,
+        customerId: '',
+        spec: r.spec || '',
+        shortName: r.name,
+        perBox: 12,
+        boxL: 500,
+        boxW: 340,
+        boxH: 200,
+        boxWeight: 8,
+        boxColor: '#d99a5a',
+        accentColor: '#3aa15c',
+        textColor: '#ffffff',
+      }
+      nextSkus = [sku, ...nextSkus]
+      nameIndex.set(key, sku.id)
+      skuId = sku.id
+      skusCreated++
+    }
+
+    // 找同 sku + 同生产日期的批次，没有就建一个
+    let batch = nextBatches.find((b) => b.skuId === skuId && b.prodDate === r.prodDate)
+    if (!batch) {
+      batch = {
+        id: uid(),
+        skuId,
+        batchNo: r.prodDate.replace(/-/g, '') || '无批次',
+        qty: r.qty,
+        prodDate: r.prodDate,
+        createdAt: Date.now(),
+      }
+      nextBatches = [batch, ...nextBatches]
+    } else {
+      nextBatches = nextBatches.map((b) => (b.id === batch!.id ? { ...b, qty: b.qty + r.qty } : b))
+    }
+
+    push({ type: 'in', skuId, batchId: batch.id, qty: r.qty, ref: 'Excel导入', note: `入库(${r.prodDate})` })
+    added++
+  }
+
+  commit({ ...state, skus: nextSkus, batches: nextBatches, moves: nextMoves })
+  return { added, skusCreated, skipped }
+}
+
+function normName(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, '')
+}
+
 /** 退货 / 补货：往已有批次里加数量 */
 export function returnToBatch(batchId: string, qty: number, note = '退货入库') {
   const batch = state.batches.find((b) => b.id === batchId)

@@ -12,7 +12,7 @@ const TABS = [
   { key: 'records', label: '记录', icon: 'records' },
   { key: 'stock', label: '库存', icon: 'stock' },
   { key: 'catalog', label: '档案', icon: 'catalog' },
-  { key: 'me', label: '我的', icon: 'me' },
+  { key: 'me', label: '数据', icon: 'me' },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']

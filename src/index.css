@@ -2838,3 +2838,108 @@ textarea.input {
   font-variant-numeric: tabular-nums;
 }
 
+/* ============================================================
+   数据中心 · 台账
+   ============================================================ */
+
+.ledger-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--fill);
+  margin-bottom: 12px;
+}
+
+.ledger-tab {
+  flex: 1;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sub);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.ledger-tab.on {
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.ledger-table {
+  max-height: 42vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
+  border-radius: 8px;
+}
+
+.ledger-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-table th {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--sub);
+  padding: 6px 8px;
+  border-bottom: 0.5px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.ledger-table td {
+  padding: 7px 8px;
+  border-bottom: 0.5px solid var(--line);
+  color: var(--text);
+  vertical-align: top;
+}
+
+.ledger-table td:first-child,
+.ledger-table th:first-child {
+  padding-left: 4px;
+}
+
+.ledger-table td:last-child,
+.ledger-table th:last-child {
+  padding-right: 4px;
+}
+
+.ledger-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ledger-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ledger-actions .btn {
+  width: 100%;
+  height: 46px;
+  font-size: 15px;
+}
+
+.ledger-actions .btn:disabled {
+  opacity: 0.4;
+}
+
+.ledger-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--faint);
+}
+
