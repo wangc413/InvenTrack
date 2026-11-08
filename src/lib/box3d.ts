@@ -548,8 +548,8 @@ export function mountBoxes(
 
   /** 每块板的 group，按索引对应；点击拾取和选中高亮都靠它 */
   const palletGroups: THREE.Group[] = []
-  /** 每块板的高亮线框，选中时才显示 */
-  const highlights: THREE.LineSegments[] = []
+  /** 每块板的高亮外壳（半透明罩，选中时才显示） */
+  const highlights: THREE.Mesh[] = []
   let selectedIdx = -1
 
   function clearRoot() {
@@ -626,13 +626,21 @@ export function mountBoxes(
         }
       }
 
-      // 高亮线框：选中的板描一圈醒目的边，一眼看出点的是哪块
-      const hl = new THREE.Box3Helper(new THREE.Box3(), 0xff4d4f)
+      // 选中高亮：一块柔和的橙色光斑贴在地面（放 root 层，不随板抬高），选中时亮起
+      const hlGeo = new THREE.CircleGeometry(Math.max(palletL, palletW) * 0.58, 40)
+      const hlMat = new THREE.MeshBasicMaterial({
+        color: 0xff9f43,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+      })
+      const hl = new THREE.Mesh(hlGeo, hlMat)
+      hl.rotation.x = -Math.PI / 2
+      hl.position.set(group.position.x, 0.005, group.position.z)
       hl.visible = false
-      hl.material.transparent = true
-      hl.material.opacity = 0.9
-      hl.material.depthTest = false
-      group.add(hl)
+      hl.renderOrder = 10
+      root.add(hl)
+      transient.push(hlGeo, hlMat)
       highlights.push(hl)
       palletGroups.push(group)
     }
@@ -643,15 +651,6 @@ export function mountBoxes(
       bbox.getCenter(center)
       bbox.getSize(size)
       frameBounds()
-    }
-
-    // 摆完箱子后，把每块板的高亮线框更新到实际包围盒
-    for (const hl of highlights) {
-      hl.box.setFromObject(hl.parent as THREE.Object3D)
-    }
-    if (selectedIdx >= 0) {
-      highlights[selectedIdx]?.box.setFromObject(palletGroups[selectedIdx])
-      highlights[selectedIdx].visible = true
     }
   }
 
@@ -679,16 +678,15 @@ export function mountBoxes(
   const ro = new ResizeObserver(resize)
   ro.observe(container)
 
-  /** 选中高亮某块板，-1 取消高亮 */
+  /** 选中高亮某块板，-1 取消：选中的板整体抬高 + 底部光斑亮起，一眼认出是哪块 */
   function select(index: number) {
     selectedIdx = index
     highlights.forEach((hl, i) => {
-      if (i === index) {
-        hl.box.setFromObject(palletGroups[i])
-        hl.visible = true
-      } else {
-        hl.visible = false
-      }
+      hl.visible = i === index
+    })
+    palletGroups.forEach((g, i) => {
+      // 平滑抬高：选中 0.06 米，其余落回 0
+      g.position.y = i === index ? 0.06 : 0
     })
   }
 
