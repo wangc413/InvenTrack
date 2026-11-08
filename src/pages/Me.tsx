@@ -28,6 +28,8 @@ export default function Me() {
   const xlsxRef = useRef<HTMLInputElement>(null)
   /** 当前打开的表页面，null 表示在数据中心首页列表 */
   const [view, setView] = useState<LedgerKey | null>(null)
+  /** 「台账」分组是否展开（下拉展示子表） */
+  const [ledgerOpen, setLedgerOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
 
@@ -304,34 +306,36 @@ export default function Me() {
       </header>
 
       <main className="page">
-        {/* —— 台账（点表名打开独立页面）—— */}
-        <div className="sec-title">台账</div>
-        <div className="card">
-          <div className="row" onClick={() => setView('out')}>
-            <div className="grow">
-              <div className="name">出库台账</div>
-              <div className="meta">按品名 + 生产日期累计出库</div>
+        {/* —— 台账（点击标题下拉展开子表列表）—— */}
+        <button className="group-toggle" onClick={() => setLedgerOpen((v) => !v)}>
+          <span className="group-title">台账</span>
+          <Icon name="chevron" size={18} className={`group-arrow ${ledgerOpen ? 'open' : ''}`} />
+        </button>
+        {ledgerOpen && (
+          <div className="card">
+            <div className="row" onClick={() => setView('out')}>
+              <div className="grow">
+                <div className="name">出库台账</div>
+                <div className="meta">按品名 + 生产日期累计出库</div>
+              </div>
+              <span className="tag">{outAgg.length > 0 ? `${outAgg.length} 项` : '暂无'}</span>
             </div>
-            <span className="tag">{outAgg.length > 0 ? `${outAgg.length} 项` : '暂无'}</span>
-            <Icon name="chevron" size={18} className="row-chevron" />
-          </div>
-          <div className="row" onClick={() => setView('load')}>
-            <div className="grow">
-              <div className="name">装车记录</div>
-              <div className="meta">每车装了什么、装了多少</div>
+            <div className="row" onClick={() => setView('load')}>
+              <div className="grow">
+                <div className="name">装车记录</div>
+                <div className="meta">每车装了什么、装了多少</div>
+              </div>
+              <span className="tag">{shipLines.length > 0 ? `${shipLines.length} 条` : '暂无'}</span>
             </div>
-            <span className="tag">{shipLines.length > 0 ? `${shipLines.length} 条` : '暂无'}</span>
-            <Icon name="chevron" size={18} className="row-chevron" />
-          </div>
-          <div className="row" onClick={() => setView('inbound')}>
-            <div className="grow">
-              <div className="name">入库登记表</div>
-              <div className="meta">导入 Excel 直接加库存</div>
+            <div className="row" onClick={() => setView('inbound')}>
+              <div className="grow">
+                <div className="name">入库登记表</div>
+                <div className="meta">导入 Excel 直接加库存</div>
+              </div>
+              <span className="tag">件=箱</span>
             </div>
-            <span className="tag">件=箱</span>
-            <Icon name="chevron" size={18} className="row-chevron" />
           </div>
-        </div>
+        )}
 
         <input
           ref={xlsxRef}
