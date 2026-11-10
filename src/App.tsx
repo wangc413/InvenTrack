@@ -50,7 +50,7 @@ export default function App() {
           <span style={{ flex: 1 }}>
             {info.error}
             <br />
-            请到「我的 → 导出备份」先存一份，再继续操作。
+            数据写入失败，请关闭后重试，或清理浏览器缓存。
           </span>
         </div>
       )}

@@ -140,7 +140,7 @@ export default function Catalog() {
                     >
                       <span className="pick-swatch" style={{ background: s.accentColor, height: 30 }} />
                       <div className="grow">
-                        <div className="name">{s.shortName}</div>
+                        <div className="name">{s.name}</div>
                         <div className="meta">{s.spec || '无规格'}</div>
                         <div className="meta">
                           {s.boxL}×{s.boxW}×{s.boxH} mm · {s.boxWeight} kg/箱

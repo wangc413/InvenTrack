@@ -116,6 +116,11 @@ function PlanEditor({
   const skus = customerId ? skusOfCustomer(db, customerId) : []
   const set = (key: string, patch: Partial<PlanRow>) =>
     onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
+  /** 删掉一行：至少留一行（全删光就不方便再加了） */
+  const remove = (key: string) => {
+    if (rows.length <= 1) return
+    onChange(rows.filter((r) => r.key !== key))
+  }
   const total = rows.reduce((s, r) => s + (Number(r.boxes) || 0), 0)
   const valid = rows.filter((r) => r.skuId && r.prodDate && Number(r.boxes) > 0).length
   /** 当前点开的弹层：{ key, type } 只跟一行、一种（品/日期）联动 */
@@ -150,6 +155,15 @@ function PlanEditor({
                 {sku && <span className="dot" style={{ background: sku.accentColor }} />}
                 <b>{sku ? nickOf(sku) : '选品'}</b>
                 <i className="caret" />
+              </button>
+              <button
+                type="button"
+                className="plan-del"
+                onClick={() => remove(r.key)}
+                disabled={rows.length <= 1}
+                aria-label="删除这一行"
+              >
+                <Icon name="close" size={15} />
               </button>
             </div>
             {skuOpen && (

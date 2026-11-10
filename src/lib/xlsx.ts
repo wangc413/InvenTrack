@@ -140,16 +140,27 @@ export type ShipLine = {
   spec: string // 规格
   prodDate: string // 生产日期
   boxes: number // 箱数（件）
+  /** 发车前这一刻，这个「品名 + 生产日期」账上还剩多少箱（库存数量） */
+  before: number
+  /** 发车后的剩余 = 库存数量 - 当日出库（结存） */
+  after: number
 }
 
 /**
  * 从发货订单派生出库台账/装车记录的明细行。
  * 只统计已发货（shipped）的订单。
+ *
+ * 库存数量 / 结存按「品名 + 生产日期」逐日滚动推算：
+ * 把该品该日期的入库流水按时间累计成「期初库存」，再按发货先后逐行扣减——
+ * 每行的「库存数量」= 发车前剩余，「结存」= 库存数量 - 当日出库；
+ * 下一行的库存数量接上一行的结存，如此滚动（库存数量 = 当日出库 + 结存）。
  */
 export function buildShipLines(db: {
   orders: { status: string; destination: string; customerId: string; createdAt: number; pallets: { skuId: string; prodDate: string; layers: number; perLayer: number; topCount: number }[] }[]
   customers: { id: string; name: string }[]
-  skus: { id: string; name: string; spec: string }[]
+  skus: { id: string; name: string; spec: string; perBox: number }[]
+  moves?: { type: string; at: number; skuId: string; batchId?: string; qty: number; voided?: boolean }[]
+  batches?: { id: string; skuId: string; prodDate: string }[]
 }): ShipLine[] {
   const lines: ShipLine[] = []
   for (const o of db.orders) {
@@ -166,10 +177,46 @@ export function buildShipLines(db: {
         spec: sku.spec,
         prodDate: p.prodDate,
         boxes,
+        before: 0,
+        after: 0,
       })
     }
   }
   lines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+  // —— 逐「品名 + 生产日期」推算库存数量 / 结存 ——
+  // 每个 sku 一个箱规（件→箱 的折算）
+  const perBoxOf = new Map(db.skus.filter((s) => s && s.id).map((s) => [s.id, s.perBox > 0 ? s.perBox : 1]))
+  // batchId -> 生产日期，用于把入库流水归到「skuId + 生产日期」这一维度
+  const batchProdDate = new Map((db.batches ?? []).filter((b) => b && b.id).map((b) => [b.id, b.prodDate]))
+  const flowKey = (skuId: string, prodDate: string) => `${skuId}|${prodDate}`
+
+  // 期初总入库（件）：只累加「入库/回补/正调整」等正数入账，不含出库负数。
+  // 出库由下面逐行扣减，避免重复。
+  const initStock = new Map<string, number>()
+  for (const m of db.moves ?? []) {
+    if (m.voided || !m.qty) continue
+    if (m.type === 'out') continue // 出库不在期初里算，逐行滚动扣
+    const prodDate = (m.batchId ? batchProdDate.get(m.batchId) : undefined) ?? ''
+    const key = flowKey(m.skuId, prodDate)
+    initStock.set(key, (initStock.get(key) ?? 0) + m.qty)
+  }
+
+  // 逐行滚动：同一 sku+日期，结存接续；发车前剩余 = 上一次结存（首行=期初总入库）
+  const running = new Map<string, number>() // key -> 发车前剩余件数
+  for (const l of lines) {
+    const skuMatch = db.skus.find((s) => s.name === l.product && s.spec === l.spec)
+    if (!skuMatch) continue
+    const key = flowKey(skuMatch.id, l.prodDate)
+    const perBox = perBoxOf.get(skuMatch.id) ?? 1
+    let beforePcs = running.get(key)
+    if (beforePcs === undefined) beforePcs = initStock.get(key) ?? 0
+    l.before = Math.max(0, Math.round(beforePcs / perBox))
+    const afterPcs = beforePcs - l.boxes * perBox
+    l.after = Math.max(0, Math.round(afterPcs / perBox))
+    running.set(key, afterPcs)
+  }
+
   return lines
 }
 
@@ -187,16 +234,22 @@ export async function exportOutboundLedger(lines: ShipLine[], fileName: string) 
   ws.addRow(header)
   ws.getRow(2).font = { bold: true }
 
-  // 按 发货日期+品名+生产日期 聚合；库存/结存/备注 系统里没有，留空
-  const agg = new Map<string, { date: string; prodDate: string; product: string; spec: string; out: number }>()
+  // 按 发货日期+品名+生产日期 聚合；库存/结存按逐日滚动取每行的 before/after
+  const agg = new Map<string, { date: string; prodDate: string; product: string; spec: string; out: number; before: number; after: number }>()
   for (const l of lines) {
     const key = `${l.date}|${l.product}|${l.prodDate}`
     const e = agg.get(key)
-    if (e) e.out += l.boxes
-    else agg.set(key, { date: l.date, prodDate: l.prodDate, product: l.product, spec: l.spec, out: l.boxes })
+    if (e) {
+      e.out += l.boxes
+      // 同一天多次发同一品：库存数量取最后一次发车前的值，结存取最后一次发车后的值
+      e.before = l.before
+      e.after = l.after
+    } else {
+      agg.set(key, { date: l.date, prodDate: l.prodDate, product: l.product, spec: l.spec, out: l.boxes, before: l.before, after: l.after })
+    }
   }
   for (const [, e] of agg) {
-    ws.addRow([e.date, e.prodDate, e.product, e.spec, '', e.out, '', ''])
+    ws.addRow([e.date, e.prodDate, e.product, e.spec, e.before, e.out, e.after, ''])
   }
 
   ws.columns.forEach((c, i) => {

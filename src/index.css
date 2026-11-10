@@ -2552,6 +2552,29 @@ textarea.input {
   flex: 0 0 auto;
 }
 
+/* 删除某一行（误加品类时删掉） */
+.plan-del {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.plan-del:active {
+  background: var(--fill);
+  color: var(--danger);
+}
+.plan-del:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
 /* 内联展开的选择区：品项 / 日期 / 收货方都改成文档流内展开一排 chip，
    点一下就在下方铺开，把后续内容自然往下推，绝不浮层覆盖、不重叠 */
 .plan-inline {
@@ -2969,12 +2992,56 @@ textarea.input {
   text-align: center;
   font-size: 12px;
   color: var(--faint);
+  margin: 12px 16px 0;
+}
+
+/* 入库登记表：手机端如何传文件的引导卡 */
+.upload-guide {
+  margin: 16px 16px 0;
+  padding: 14px 16px;
+  background: var(--card);
+  border-radius: var(--radius);
+}
+.guide-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.guide-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--sub);
+  line-height: 1.5;
+  margin-top: 8px;
+}
+.guide-num {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
 }
 
 /* 列表行右侧的进入箭头 */
 .row-chevron {
   flex: 0 0 auto;
   color: var(--faint);
+}
+
+/* 列表行右侧的功能图标（上传等） */
+.row-arrow {
+  flex: 0 0 auto;
+  color: var(--sub);
 }
 
 /* 「台账」分组的下拉折叠头 */
@@ -2991,14 +3058,14 @@ textarea.input {
 }
 
 .group-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--sub);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
   letter-spacing: 0;
 }
 
 .group-arrow {
-  color: var(--faint);
+  color: var(--sub);
   transition: transform 0.18s ease;
 }
 

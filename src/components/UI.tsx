@@ -180,6 +180,18 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
     </>
   ),
+  upload: (
+    <>
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M4 20h16" />
+    </>
+  ),
+  close: (
+    <>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </>
+  ),
 }
 
 export function Icon({ name, size = 20, className }: { name: string; size?: number; className?: string }) {

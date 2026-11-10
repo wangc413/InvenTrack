@@ -121,6 +121,21 @@ export type Truck = {
   maxWeight: number
 }
 
+/** 一条已录入的「入库登记表」记录：保留原始文件信息，作为历史留档 */
+export type InboundRecord = {
+  id: string
+  /** 源文件名，如「2026年成品冷库生产入库登记表.xlsx」 */
+  fileName: string
+  /** 录入时间 */
+  at: number
+  /** 本次录入的行数（写入库存的行数） */
+  rows: number
+  /** 新建的品项数 */
+  skusCreated: number
+  /** 明细行（品名 / 规格 / 生产日期 / 数量），供回看 */
+  lines: { name: string; spec: string; prodDate: string; qty: number }[]
+}
+
 export type DB = {
   customers: Customer[]
   skus: Sku[]
@@ -128,6 +143,8 @@ export type DB = {
   moves: Move[]
   orders: Order[]
   trucks: Truck[]
+  /** 已录入的入库登记表留档，按录入时间倒序 */
+  inboundRecords: InboundRecord[]
   seq: number
   /** 数据版本，用来判断要不要跑一次性补数 */
   version?: number
@@ -152,24 +169,9 @@ export const palletBoxes = (p: Pallet) =>
 export const DEFAULT_LAYERS = 7
 export const DEFAULT_PER_LAYER = 6
 
-/** 从箱面大字里猜一个短称：鲜汁大肉包 → 肉包 */
-const NICK_RULES: [RegExp, string][] = [
-  [/烧麦/, '烧麦'],
-  [/肉包/, '肉包'],
-  [/菜包/, '菜包'],
-  [/花卷/, '花卷'],
-  [/馒头/, '馒头'],
-  [/饺子|水饺/, '饺子'],
-  [/菜团子/, '菜团子'],
-  [/糯米鸡/, '糯米鸡'],
-  [/馄饨/, '馄饨'],
-]
-
-/** 列表、标签上用的短称 */
+/** 列表、标签上用的名称：统一显示全称（如「超合算 NB 鲜汁大肉包」），不再用「肉包」这类短称 */
 export function nickOf(sku: Sku) {
-  if (sku.nick?.trim()) return sku.nick.trim()
-  const hit = NICK_RULES.find(([re]) => re.test(sku.shortName))
-  return hit ? hit[1] : sku.shortName.slice(0, 4)
+  return sku.name?.trim() || sku.shortName || ''
 }
 
 export const CUSTOMER_HM = 'c-hm'
@@ -184,13 +186,42 @@ export const KLH_STOCK_DAYS = [4, 2]
 export const KLH_STOCK_BOXES = 100
 
 /** 数据版本：升级时靠它判断要不要补示例数据 */
-const DATA_VERSION = 4
+const DATA_VERSION = 5
 
 function seed(): DB {
   const customers: Customer[] = [
     { id: CUSTOMER_HM, name: '盒马', short: '盒马' },
     { id: CUSTOMER_KLH, name: '快乐猴', short: '快乐猴' },
     { id: CUSTOMER_CYY, name: '菜洋洋', short: '菜洋洋' },
+    // —— 以下按 2026 年成品冷库生产入库登记表 补充的品牌（收货方）——
+    { id: 'c-zhongkouxian', name: '众口鲜', short: '众口鲜' },
+    { id: 'c-lengfeng', name: '冷丰', short: '冷丰' },
+    { id: 'c-qiyao', name: '启肴', short: '启肴' },
+    { id: 'c-weierxian', name: '味儿鲜', short: '味儿鲜' },
+    { id: 'c-duoyaxianxiang', name: '哆雅鲜享', short: '哆雅鲜享' },
+    { id: 'c-kenye', name: '垦野', short: '垦野' },
+    { id: 'c-waipodaren', name: '外婆大人', short: '外婆大人' },
+    { id: 'c-tianhe', name: '天荷', short: '天荷' },
+    { id: 'c-anfuchengxiang', name: '安福呈祥', short: '安福呈祥' },
+    { id: 'c-xiaolongkan', name: '小龙坎', short: '小龙坎' },
+    { id: 'c-chuanweijingzao', name: '川为精造', short: '川为精造' },
+    { id: 'c-chuanxiangong', name: '川鲜公', short: '川鲜公' },
+    { id: 'c-laoxiansheng', name: '捞鲜生', short: '捞鲜生' },
+    { id: 'c-xinyueyang', name: '欣悦阳', short: '欣悦阳' },
+    { id: 'c-hanjing', name: '汉景', short: '汉景' },
+    { id: 'c-piaochongxiansheng', name: '瓢虫鲜生', short: '瓢虫鲜生' },
+    { id: 'c-zhenshihui', name: '甄实惠', short: '甄实惠' },
+    { id: 'c-zhixianglai', name: '知享睐', short: '知享睐' },
+    { id: 'c-shijian', name: '示剑', short: '示剑' },
+    { id: 'c-fuyunlitianxia', name: '福运立天下', short: '福运立天下' },
+    { id: 'c-qinzhiwei', name: '秦芝味', short: '秦芝味' },
+    { id: 'c-liqun', name: '立群', short: '立群' },
+    { id: 'c-hangzhoumeishi', name: '航舟美时', short: '航舟美时' },
+    { id: 'c-sujie', name: '苏杰', short: '苏杰' },
+    { id: 'c-zhenglaisi', name: '蒸来思', short: '蒸来思' },
+    { id: 'c-huochu', name: '霍厨', short: '霍厨' },
+    { id: 'c-xianbaite', name: '鲜佰特', short: '鲜佰特' },
+    { id: 'c-maitianxi', name: '麦田喜', short: '麦田喜' },
   ]
 
   const mk = (s: Partial<Sku> & Pick<Sku, 'id' | 'name' | 'shortName' | 'spec' | 'customerId'>): Sku => ({
@@ -331,6 +362,101 @@ function seed(): DB {
       boxWeight: 7.2,
       accentColor: '#6b2f2a',
     }),
+    mk({ id: 'sku-zhongkouxian-1', name: '众口鲜150g荷香糯米鸡', shortName: '150g荷香糯米鸡', spec: '1*900g*12袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-2', name: '众口鲜50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-3', name: '众口鲜50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-4', name: '众口鲜70g糯米烧麦', shortName: '70g糯米烧麦', spec: '1*1.4kg*10袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-5', name: '众口鲜猪肉三鲜水饺', shortName: '猪肉三鲜水饺', spec: '1*2.5kg*2袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-6', name: '众口鲜猪肉大葱水饺', shortName: '猪肉大葱水饺', spec: '1*2.5kg*2袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-7', name: '众口鲜猪肉白菜水饺', shortName: '猪肉白菜水饺', spec: '1*2.5kg*2袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-8', name: '众口鲜猪肉香菇水饺', shortName: '猪肉香菇水饺', spec: '1*2.5kg*2袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-zhongkouxian-9', name: '众口鲜韭菜鸡蛋水饺', shortName: '韭菜鸡蛋水饺', spec: '1*2.5kg*2袋', customerId: 'c-zhongkouxian' }),
+    mk({ id: 'sku-lengfeng-1', name: '冷丰50g腊肠烧麦', shortName: '50g腊肠烧麦', spec: '1*2.5kg*4袋', customerId: 'c-lengfeng' }),
+    mk({ id: 'sku-lengfeng-2', name: '冷丰60g咸蛋黄纸皮烧麦', shortName: '60g咸蛋黄纸皮烧麦', spec: '1*2.5kg*4袋', customerId: 'c-lengfeng' }),
+    mk({ id: 'sku-qiyao-1', name: '启肴80g招牌肉包', shortName: '80g招牌肉包', spec: '1*1.6kg*6袋', customerId: 'c-qiyao' }),
+    mk({ id: 'sku-qiyao-2', name: '启肴80g梅干菜包', shortName: '80g梅干菜包', spec: '1*1.6kg*6袋', customerId: 'c-qiyao' }),
+    mk({ id: 'sku-qiyao-3', name: '启肴80g豆沙包', shortName: '80g豆沙包', spec: '1*1.6kg*6袋', customerId: 'c-qiyao' }),
+    mk({ id: 'sku-qiyao-4', name: '启肴80g香菇青菜包', shortName: '80g香菇青菜包', spec: '1*1.6kg*6袋', customerId: 'c-qiyao' }),
+    mk({ id: 'sku-qiyao-5', name: '启肴80g香辣粉丝包', shortName: '80g香辣粉丝包', spec: '1*1.6kg*6袋', customerId: 'c-qiyao' }),
+    mk({ id: 'sku-weierxian-1', name: '味儿鲜50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-weierxian' }),
+    mk({ id: 'sku-duoyaxianxiang-1', name: '哆雅鲜享50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-duoyaxianxiang' }),
+    mk({ id: 'sku-kenye-1', name: '垦野50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*500g*20袋', customerId: 'c-kenye' }),
+    mk({ id: 'sku-waipodaren-1', name: '外婆大人70g肉汁烧麦', shortName: '70g肉汁烧麦', spec: '1*1.4kg*10袋', customerId: 'c-waipodaren' }),
+    mk({ id: 'sku-tianhe-1', name: '天荷12g黑芝麻汤圆', shortName: '12g黑芝麻汤圆', spec: '1*200g*50袋', customerId: 'c-tianhe' }),
+    mk({ id: 'sku-tianhe-2', name: '天荷55g流心豆沙包', shortName: '55g流心豆沙包', spec: '1*330g*30袋', customerId: 'c-tianhe' }),
+    mk({ id: 'sku-tianhe-3', name: '天荷60g流心豆沙包', shortName: '60g流心豆沙包', spec: '1*360g*30袋', customerId: 'c-tianhe' }),
+    mk({ id: 'sku-tianhe-4', name: '天荷黑猪肉虾仁水饺', shortName: '黑猪肉虾仁水饺', spec: '1*2.5kg*4袋', customerId: 'c-tianhe' }),
+    mk({ id: 'sku-anfuchengxiang-1', name: '安福呈祥70g猪肉香菇烧麦', shortName: '70g猪肉香菇烧麦', spec: '1*3.5kg*4袋', customerId: 'c-anfuchengxiang' }),
+    mk({ id: 'sku-xiaolongkan-1', name: '小龙坎25g火锅味老面小笼包', shortName: '25g火锅味老面小笼包', spec: '1*200g*40袋', customerId: 'c-xiaolongkan' }),
+    mk({ id: 'sku-xiaolongkan-2', name: '小龙坎25g黑猪肉老面小笼包', shortName: '25g黑猪肉老面小笼包', spec: '1*200g*40袋', customerId: 'c-xiaolongkan' }),
+    mk({ id: 'sku-xiaolongkan-3', name: '小龙坎50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-xiaolongkan' }),
+    mk({ id: 'sku-xiaolongkan-4', name: '小龙坎50g糯米烧麦(香菇猪肉味)', shortName: '50g糯米烧麦(香菇猪肉味)', spec: '1*1kg*10袋', customerId: 'c-xiaolongkan' }),
+    mk({ id: 'sku-chuanweijingzao-1', name: '川为精猪肉大葱水饺', shortName: '川为精猪肉大葱水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-2', name: '川为精猪肉白菜水饺', shortName: '川为精猪肉白菜水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-3', name: '川为精造16g猪肉大葱水饺', shortName: '16g猪肉大葱水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-4', name: '川为精造16g猪肉白菜水饺', shortName: '16g猪肉白菜水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-5', name: '川为精造16g韭菜鸡蛋水饺', shortName: '16g韭菜鸡蛋水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-6', name: '川为精造猪肉玉米水饺', shortName: '猪肉玉米水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-7', name: '川为精造猪肉韭菜水饺', shortName: '猪肉韭菜水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanweijingzao-8', name: '川为精造韭菜鸡蛋水饺', shortName: '韭菜鸡蛋水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanweijingzao' }),
+    mk({ id: 'sku-chuanxiangong-1', name: '川鲜公20g猪肉大葱水饺', shortName: '20g猪肉大葱水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-chuanxiangong-2', name: '川鲜公20g猪肉玉米水饺', shortName: '20g猪肉玉米水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-chuanxiangong-3', name: '川鲜公20g猪肉白菜水饺', shortName: '20g猪肉白菜水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-chuanxiangong-4', name: '川鲜公20g猪肉韭菜水饺', shortName: '20g猪肉韭菜水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-chuanxiangong-5', name: '川鲜公50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-chuanxiangong-6', name: '川鲜公猪肉大葱水饺', shortName: '猪肉大葱水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-chuanxiangong-7', name: '川鲜公猪肉玉米水饺', shortName: '猪肉玉米水饺', spec: '1*2.5kg*2袋', customerId: 'c-chuanxiangong' }),
+    mk({ id: 'sku-laoxiansheng-1', name: '捞鲜生150g荷香糯米鸡', shortName: '150g荷香糯米鸡', spec: '1*900g*12袋', customerId: 'c-laoxiansheng' }),
+    mk({ id: 'sku-xinyueyang-1', name: '欣悦阳50g猪肉香烧麦', shortName: '50g猪肉香烧麦', spec: '1*1kg*10袋', customerId: 'c-xinyueyang' }),
+    mk({ id: 'sku-xinyueyang-2', name: '欣悦阳50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-xinyueyang' }),
+    mk({ id: 'sku-xinyueyang-3', name: '欣悦阳70g猪肉香烧麦', shortName: '70g猪肉香烧麦', spec: '1*3.5kg*4袋', customerId: 'c-xinyueyang' }),
+    mk({ id: 'sku-xinyueyang-4', name: '欣悦阳70g猪肉香菇烧麦', shortName: '70g猪肉香菇烧麦', spec: '1*3.5kg*4袋', customerId: 'c-xinyueyang' }),
+    mk({ id: 'sku-hanjing-1', name: '汉景20g黑芝麻汤圆', shortName: '20g黑芝麻汤圆', spec: '1*2.5kg*4袋', customerId: 'c-hanjing' }),
+    mk({ id: 'sku-piaochongxiansheng-1', name: '瓢虫鲜生12g黑芝麻汤圆', shortName: '12g黑芝麻汤圆', spec: '1*500g*20袋', customerId: 'c-piaochongxiansheng' }),
+    mk({ id: 'sku-zhenshihui-1', name: '甄实惠12g黑芝麻汤圆', shortName: '12g黑芝麻汤圆', spec: '1*2.5kg*4袋', customerId: 'c-zhenshihui' }),
+    mk({ id: 'sku-zhixianglai-1', name: '知享睐50g猪肉香烧麦', shortName: '50g猪肉香烧麦', spec: '1*1kg*10袋', customerId: 'c-zhixianglai' }),
+    mk({ id: 'sku-shijian-1', name: '示剑12g黑芝麻汤圆', shortName: '12g黑芝麻汤圆', spec: '1*320g*30袋', customerId: 'c-shijian' }),
+    mk({ id: 'sku-fuyunlitianxia-1', name: '福运立天下50g猪肉香烧麦', shortName: '50g猪肉香烧麦', spec: '1*1kg*10袋', customerId: 'c-fuyunlitianxia' }),
+    mk({ id: 'sku-fuyunlitianxia-2', name: '福运立天下50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-fuyunlitianxia' }),
+    mk({ id: 'sku-fuyunlitianxia-3', name: '福运立天下55g火腿玉米烧麦', shortName: '55g火腿玉米烧麦', spec: '1*1.1kg*10袋', customerId: 'c-fuyunlitianxia' }),
+    mk({ id: 'sku-fuyunlitianxia-4', name: '福运立天下70g猪肉香菇烧麦', shortName: '70g猪肉香菇烧麦', spec: '1*1.05kg*10袋', customerId: 'c-fuyunlitianxia' }),
+    mk({ id: 'sku-qinzhiwei-1', name: '秦芝味25g捞面小笼包', shortName: '25g捞面小笼包', spec: '1*200g*40袋', customerId: 'c-qinzhiwei' }),
+    mk({ id: 'sku-qinzhiwei-2', name: '秦芝味25g黑猪肉小笼包', shortName: '25g黑猪肉小笼包', spec: '1*200g*40袋', customerId: 'c-qinzhiwei' }),
+    mk({ id: 'sku-liqun-1', name: '立群12g黑芝麻汤圆', shortName: '12g黑芝麻汤圆', spec: '1*2.5kg*4袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-2', name: '立群20g猪肉芹菜水饺', shortName: '20g猪肉芹菜水饺', spec: '1*2.5kg*4袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-3', name: '立群50g梅干菜烧麦', shortName: '50g梅干菜烧麦', spec: '1*1kg*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-4', name: '立群50g火腿玉米烧麦', shortName: '50g火腿玉米烧麦', spec: '1*1kg*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-5', name: '立群50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-6', name: '立群70g猪肉香菇烧麦', shortName: '70g猪肉香菇烧麦', spec: '1*1.4kg*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-7', name: '立群70g肉汁烧麦', shortName: '70g肉汁烧麦', spec: '1*1.4kg*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-8', name: '立群80g梅干菜包', shortName: '80g梅干菜包', spec: '1*800g*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-9', name: '立群80g梅干菜包(橡果)', shortName: '80g梅干菜包(橡果)', spec: '1*800g*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-10', name: '立群80g猪肉包', shortName: '80g猪肉包', spec: '1*800g*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-11', name: '立群80g猪肉包(散装)', shortName: '80g猪肉包(散装)', spec: '1*8kg*1袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-12', name: '立群80g猪肉包(橡果)', shortName: '80g猪肉包(橡果)', spec: '1*800g*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-13', name: '立群80g香菇青菜包(橡果)', shortName: '80g香菇青菜包(橡果)', spec: '1*800g*10袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-14', name: '立群猪肉玉米水饺', shortName: '猪肉玉米水饺', spec: '1*2.5kg*4袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-liqun-15', name: '立群猪肉香菇水饺', shortName: '猪肉香菇水饺', spec: '1*2.5kg*4袋', customerId: 'c-liqun' }),
+    mk({ id: 'sku-hangzhoumeishi-1', name: '航舟美时70g猪肉香烧麦', shortName: '70g猪肉香烧麦', spec: '1*1.4kg*10袋', customerId: 'c-hangzhoumeishi' }),
+    mk({ id: 'sku-hangzhoumeishi-2', name: '航舟美时70g猪肉香菇烧麦', shortName: '70g猪肉香菇烧麦', spec: '1*1.4kg*10袋', customerId: 'c-hangzhoumeishi' }),
+    mk({ id: 'sku-sujie-1', name: '苏杰50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-sujie' }),
+    mk({ id: 'sku-cyy-1', name: '菜洋洋50g火腿玉米烧麦', shortName: '50g火腿玉米烧麦', spec: '1*1kg*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-2', name: '菜洋洋55g纸皮烧麦', shortName: '55g纸皮烧麦', spec: '1*1.1kg*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-3', name: '菜洋洋80g奥尔良鸡肉包', shortName: '80g奥尔良鸡肉包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-4', name: '菜洋洋80g梅干菜包', shortName: '80g梅干菜包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-5', name: '菜洋洋80g肉末粉丝包', shortName: '80g肉末粉丝包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-6', name: '菜洋洋80g豆沙包', shortName: '80g豆沙包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-7', name: '菜洋洋80g酱肉包', shortName: '80g酱肉包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-8', name: '菜洋洋80g香菇青菜包', shortName: '80g香菇青菜包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-9', name: '菜洋洋80g鲜汁肉包', shortName: '80g鲜汁肉包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-cyy-10', name: '菜洋洋火腿玉米烧麦', shortName: '火腿玉米烧麦', spec: '1*1kg*10袋', customerId: 'c-cyy' }),
+    mk({ id: 'sku-zhenglaisi-1', name: '蒸来思50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-zhenglaisi' }),
+    mk({ id: 'sku-zhenglaisi-2', name: '蒸来思70g糯米烧麦', shortName: '70g糯米烧麦', spec: '1*3.5kg*4袋', customerId: 'c-zhenglaisi' }),
+    mk({ id: 'sku-huochu-1', name: '霍厨50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-huochu' }),
+    mk({ id: 'sku-huochu-2', name: '霍厨70g糯米烧麦', shortName: '70g糯米烧麦', spec: '1*3.5kg*4袋', customerId: 'c-huochu' }),
+    mk({ id: 'sku-xianbaite-1', name: '鲜佰特50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-xianbaite' }),
+    mk({ id: 'sku-maitianxi-1', name: '麦田喜50g火腿玉米烧麦', shortName: '50g火腿玉米烧麦', spec: '1*1kg*15袋', customerId: 'c-maitianxi' }),
+    mk({ id: 'sku-maitianxi-2', name: '麦田喜50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-maitianxi' }),
   ]
 
   const batches: Batch[] = []
@@ -344,6 +470,7 @@ function seed(): DB {
     moves,
     orders: [],
     trucks: [{ id: uid(), name: '4.2米厢货', L: 4200, W: 2000, H: 2200, maxWeight: 2000 }],
+    inboundRecords: [],
     seq: 1,
     version: DATA_VERSION,
   }
@@ -356,12 +483,14 @@ function migrate(raw: Record<string, unknown>): DB {
   const base = seed()
   const data = raw as Partial<DB> & { orders?: LegacyOrder[] }
 
-  const customers = Array.isArray(data.customers) && data.customers.length ? data.customers : base.customers
+  const customers = (Array.isArray(data.customers) ? data.customers : []).filter((c) => c && typeof c === 'object' && c.id)
   const fallbackCustomer = customers[0]?.id ?? CUSTOMER_HM
+  if (customers.length === 0) customers.push(...base.customers)
 
-  // 品项：补齐新字段（客户、箱面配色、箱面大字）
-  const rawSkus = (Array.isArray(data.skus) && data.skus.length ? data.skus : base.skus) as (Sku &
-    Partial<Pick<Sku, 'customerId' | 'shortName' | 'boxColor' | 'accentColor' | 'textColor'>>)[]
+  // 品项：补齐新字段（客户、箱面配色、箱面大字）；顺带清掉历史上可能写入的空洞/空元素，避免后续 new Map 崩溃
+  const rawSkus = (Array.isArray(data.skus) ? data.skus : base.skus).filter(
+    (s) => s && typeof s === 'object' && s.id,
+  ) as (Sku & Partial<Pick<Sku, 'customerId' | 'shortName' | 'boxColor' | 'accentColor' | 'textColor'>>)[]
   const skus: Sku[] = rawSkus.map((s) => ({
     ...s,
     customerId: s.customerId ?? fallbackCustomer,
@@ -372,7 +501,9 @@ function migrate(raw: Record<string, unknown>): DB {
   }))
 
   // 批次：丢掉旧的 left 字段，余量一律由流水算
-  const rawBatches = (Array.isArray(data.batches) ? data.batches : base.batches) as (Batch & { left?: number })[]
+  const rawBatches = (Array.isArray(data.batches) ? data.batches : base.batches).filter(
+    (b) => b && typeof b === 'object' && b.id,
+  ) as (Batch & { left?: number })[]
   const batches: Batch[] = rawBatches.map((b) => ({
     id: b.id,
     skuId: b.skuId,
@@ -385,7 +516,7 @@ function migrate(raw: Record<string, unknown>): DB {
   // 没有流水的老数据：按“入库总量 - 已发出”倒推，保证结转后的余量和以前一致
   let moves: Move[]
   if (Array.isArray(data.moves)) {
-    moves = data.moves
+    moves = data.moves.filter((m) => m && typeof m === 'object' && m.id && m.skuId)
   } else {
     moves = []
     for (const b of rawBatches) {
@@ -524,6 +655,19 @@ function migrate(raw: Record<string, unknown>): DB {
     }
   }
 
+  // v5：按「2026 年成品冷库生产入库登记表」补充收货方和品项。
+  // 只补品项和收货方定义，不补库存（库存由用户自己录入 / 导入），也不动已有单据。
+  if (version < 5) {
+    for (const c of base.customers) {
+      if (customers.some((x) => x.id === c.id)) continue
+      customers.push(c)
+    }
+    for (const sku of base.skus) {
+      if (skus.some((x) => x.id === sku.id)) continue
+      skus.push(sku)
+    }
+  }
+
   return {
     customers,
     skus,
@@ -531,6 +675,7 @@ function migrate(raw: Record<string, unknown>): DB {
     moves,
     orders,
     trucks,
+    inboundRecords: Array.isArray(data.inboundRecords) ? data.inboundRecords : [],
     seq: data.seq ?? 1,
     version: DATA_VERSION,
   }
@@ -881,9 +1026,13 @@ export type InboundRow = {
 /**
  * 批量导入入库：按品名匹配已有 sku（同名就复用），没有则新建一个最简 sku；
  * 每一行按「品名 + 生产日期」建/补一个批次，并记一条入账流水。
+ * 同时把这次导入留档成一条「入库登记表」记录。
  * 全部在一个 commit 里完成，避免逐行提交刷屏。
  */
-export function importInbound(rows: InboundRow[]): { added: number; skusCreated: number; skipped: number } {
+export function importInbound(
+  rows: InboundRow[],
+  opts: { fileName?: string } = {},
+): { added: number; skusCreated: number; skipped: number } {
   let skusCreated = 0
   let added = 0
   let skipped = 0
@@ -899,6 +1048,8 @@ export function importInbound(rows: InboundRow[]): { added: number; skusCreated:
   const push = (m: Omit<Move, 'id' | 'at'>) => {
     nextMoves = [{ ...m, id: uid(), at: Date.now() }, ...nextMoves]
   }
+
+  const recordLines: { name: string; spec: string; prodDate: string; qty: number }[] = []
 
   for (const r of rows) {
     if (!(r.qty > 0)) {
@@ -948,10 +1099,21 @@ export function importInbound(rows: InboundRow[]): { added: number; skusCreated:
     }
 
     push({ type: 'in', skuId, batchId: batch.id, qty: r.qty, ref: 'Excel导入', note: `入库(${r.prodDate})` })
+    recordLines.push({ name: r.name, spec: r.spec, prodDate: r.prodDate, qty: r.qty })
     added++
   }
 
-  commit({ ...state, skus: nextSkus, batches: nextBatches, moves: nextMoves })
+  // 留档成一条入库登记表记录
+  const record: InboundRecord = {
+    id: uid(),
+    fileName: opts.fileName || '未命名文件',
+    at: Date.now(),
+    rows: added,
+    skusCreated,
+    lines: recordLines,
+  }
+
+  commit({ ...state, skus: nextSkus, batches: nextBatches, moves: nextMoves, inboundRecords: [record, ...state.inboundRecords] })
   return { added, skusCreated, skipped }
 }
 
@@ -1356,7 +1518,7 @@ export function movesOf(db: DB, skuId: string, limit = 12) {
 export function todayFlow(db: DB) {
   const start = new Date()
   start.setHours(0, 0, 0, 0)
-  const perOf = new Map(db.skus.map((s) => [s.id, s.perBox > 0 ? s.perBox : 1]))
+  const perOf = new Map(db.skus.filter((s) => s && s.id).map((s) => [s.id, s.perBox > 0 ? s.perBox : 1]))
   let inBoxes = 0
   let outBoxes = 0
   for (const m of db.moves) {
