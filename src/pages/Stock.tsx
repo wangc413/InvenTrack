@@ -12,7 +12,7 @@ import {
   type Sku,
 } from '../lib/store'
 import { boxText, moveText, splitBoxes } from '../lib/calc'
-import { Sheet, toast } from '../components/UI'
+import { Icon, Sheet, toast } from '../components/UI'
 
 type Mode = 'in' | 'return' | 'adjust'
 
@@ -43,16 +43,41 @@ export default function Stock() {
   const [batchNo, setBatchNo] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
 
-  const list = useMemo(() => {
+  /** 展开的客户（两级下拉：第一级按客户分组，第二级展开品的批次/流水） */
+  const [openCust, setOpenCust] = useState<Set<string>>(new Set())
+
+  /** 按客户分组后的品项列表。每个客户一组，未归客户的品归到「未分类」。 */
+  const groups = useMemo(() => {
     const key = q.trim().toLowerCase()
-    return db.skus
-      .map((s) => ({ sku: s, left: stockOf(db, s.id), split: splitBoxes(stockOf(db, s.id), s.perBox) }))
-      .filter(({ sku }) => !key || sku.name.toLowerCase().includes(key) || sku.code.includes(key))
+    const match = (s: Sku) => !key || s.name.toLowerCase().includes(key) || s.code.includes(key)
+    const toItem = (s: Sku) => ({ sku: s, left: stockOf(db, s.id), split: splitBoxes(stockOf(db, s.id), s.perBox) })
+    const result: { customerId: string; name: string; items: ReturnType<typeof toItem>[] }[] = []
+    for (const c of db.customers) {
+      const items = db.skus.filter((s) => s.customerId === c.id && match(s)).map(toItem).sort((a, b) => b.left - a.left)
+      if (items.length > 0) result.push({ customerId: c.id, name: c.name, items })
+    }
+    const uncat = db.skus
+      .filter((s) => (!s.customerId || !db.customers.some((c) => c.id === s.customerId)) && match(s))
+      .map(toItem)
       .sort((a, b) => b.left - a.left)
+    if (uncat.length > 0) result.push({ customerId: '', name: '未分类', items: uncat })
+    return result
   }, [db, q])
 
-  const totalBoxes = list.reduce((s, x) => s + x.split.boxes, 0)
-  const totalTail = list.reduce((s, x) => s + x.split.tail, 0)
+  const allItems = groups.flatMap((g) => g.items)
+  const totalBoxes = allItems.reduce((s, x) => s + x.split.boxes, 0)
+  const totalTail = allItems.reduce((s, x) => s + x.split.tail, 0)
+
+  /** 是否搜索中（搜索时所有含匹配品的客户都展开） */
+  const searching = q.trim().length > 0
+  const isOpen = (customerId: string) => searching || openCust.has(customerId)
+  const toggleCust = (customerId: string) =>
+    setOpenCust((prev) => {
+      const next = new Set(prev)
+      if (next.has(customerId)) next.delete(customerId)
+      else next.add(customerId)
+      return next
+    })
   const flow = todayFlow(db)
   /** 箱数只在有零头时才带小数，整箱就干脆显示整数 */
   const bx = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
@@ -137,135 +162,151 @@ export default function Stock() {
           style={{ marginBottom: 12 }}
         />
 
-        <div className="card">
-          {list.length === 0 ? (
+        {groups.length === 0 ? (
+          <div className="card card-pad">
             <div className="empty">没有匹配的品项</div>
-          ) : (
-            list.map(({ sku, left, split }) => {
-              const open = openId === sku.id
-              const batches = open ? batchesOf(db, sku.id) : []
-              const moves = open ? movesOf(db, sku.id, 6) : []
-              return (
-                <div key={sku.id}>
-                  <div className="row" onClick={() => setOpenId(open ? null : sku.id)}>
-                    <div className="grow">
-                      <div className="name">{sku.name}</div>
-                      <div className="meta">
-                        {sku.spec || '无规格'} · 每箱 {sku.perBox} 件
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
-                      <div
-                        className="num"
-                        style={{ fontSize: 17, fontWeight: 600, color: left > 0 ? 'var(--text)' : 'var(--danger)' }}
-                      >
-                        {split.boxes}
-                      </div>
-                      <div className="meta num">
-                        箱{split.tail > 0 ? ` + ${split.tail} 件` : ` · ${left} 件`}
-                      </div>
-                    </div>
-                  </div>
+          </div>
+        ) : (
+          groups.map((g) => {
+            const open = isOpen(g.customerId)
+            return (
+              <section key={g.customerId || '__uncat'}>
+                <button className="group-toggle" type="button" onClick={() => toggleCust(g.customerId)}>
+                  <span className="group-title">{g.name}</span>
+                  <span className="group-count">{g.items.length} 个品</span>
+                  <Icon name="chevron" size={18} className={`group-arrow ${open ? 'open' : ''}`} />
+                </button>
+                {open && (
+                  <div className="card">
+                    {g.items.map(({ sku, left, split }) => {
+                      const detailOpen = openId === sku.id
+                      const batches = detailOpen ? batchesOf(db, sku.id) : []
+                      const moves = detailOpen ? movesOf(db, sku.id, 6) : []
+                      return (
+                        <div key={sku.id}>
+                          <div className="row" onClick={() => setOpenId(detailOpen ? null : sku.id)}>
+                            <div className="grow">
+                              <div className="name">{sku.name}</div>
+                              <div className="meta">
+                                {sku.spec || '无规格'} · 每箱 {sku.perBox} 件
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+                              <div
+                                className="num"
+                                style={{ fontSize: 17, fontWeight: 600, color: left > 0 ? 'var(--text)' : 'var(--danger)' }}
+                              >
+                                {split.boxes}
+                              </div>
+                              <div className="meta num">
+                                箱{split.tail > 0 ? ` + ${split.tail} 件` : ` · ${left} 件`}
+                              </div>
+                            </div>
+                          </div>
 
-                  {open && (
-                    <div className="panel">
-                      <div className="sub-label">批次（按入库先后，发车时先进先出）</div>
-                      {batches.length === 0 ? (
-                        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 10px' }}>没有余量批次</div>
-                      ) : (
-                        batches.map(({ batch, left: bLeft }) => (
-                          <div
-                            key={batch.id}
-                            className="thumb-row"
-                            onClick={() => openSheet('adjust', sku, batch.id)}
-                          >
-                            <div className="tr-main">
-                              <div className="tr-line">
-                                <span className="tr-title">{batch.batchNo}</span>
-                                <span
-                                  className="tr-num"
-                                  style={{ color: bLeft > 0 ? 'var(--text)' : 'var(--danger)' }}
+                          {detailOpen && (
+                            <div className="panel">
+                              <div className="sub-label">批次（按入库先后，发车时先进先出）</div>
+                              {batches.length === 0 ? (
+                                <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 10px' }}>没有余量批次</div>
+                              ) : (
+                                batches.map(({ batch, left: bLeft }) => (
+                                  <div
+                                    key={batch.id}
+                                    className="thumb-row"
+                                    onClick={() => openSheet('adjust', sku, batch.id)}
+                                  >
+                                    <div className="tr-main">
+                                      <div className="tr-line">
+                                        <span className="tr-title">{batch.batchNo}</span>
+                                        <span
+                                          className="tr-num"
+                                          style={{ color: bLeft > 0 ? 'var(--text)' : 'var(--danger)' }}
+                                        >
+                                          {boxText(bLeft, sku.perBox)}
+                                        </span>
+                                      </div>
+                                      <div className="tr-meta">
+                                        生产 {batch.prodDate || '—'} · 入库 {boxText(batch.qty, sku.perBox)}
+                                      </div>
+                                    </div>
+                                    <div className="tr-actions">
+                                      <button
+                                        className="btn sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          openSheet('return', sku, batch.id)
+                                        }}
+                                      >
+                                        退货
+                                      </button>
+                                      <button
+                                        className="btn sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          openSheet('adjust', sku, batch.id)
+                                        }}
+                                      >
+                                        盘点
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+
+                              <div className="sub-label" style={{ marginTop: 14 }}>
+                                最近流水
+                              </div>
+                              {moves.length === 0 ? (
+                                <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 2px' }}>还没有流水</div>
+                              ) : (
+                                moves.map((m) => (
+                                  <div key={m.id} className="flow-row">
+                                    <span>{fmtTime(m.at)}</span>
+                                    <span>{TYPE_LABEL[m.type] ?? m.type}</span>
+                                    <span className={`flow-qty ${m.qty > 0 ? 'plus' : ''}`}>
+                                      {moveText(m.qty, sku.perBox)}
+                                    </span>
+                                    <span className="flow-ref">{m.ref}</span>
+                                  </div>
+                                ))
+                              )}
+
+                              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                <button
+                                  className="btn primary sm"
+                                  style={{ flex: 1 }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openSheet('in', sku)
+                                  }}
                                 >
-                                  {boxText(bLeft, sku.perBox)}
-                                </span>
-                              </div>
-                              <div className="tr-meta">
-                                生产 {batch.prodDate || '—'} · 入库 {boxText(batch.qty, sku.perBox)}
+                                  + 入库
+                                </button>
+                                <button
+                                  className="btn sm"
+                                  style={{ flex: 1 }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const first = batches[0]
+                                    if (!first) return toast('还没有批次，先入库')
+                                    openSheet('return', sku, first.batch.id)
+                                  }}
+                                >
+                                  退货入库
+                                </button>
                               </div>
                             </div>
-                            <div className="tr-actions">
-                              <button
-                                className="btn sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  openSheet('return', sku, batch.id)
-                                }}
-                              >
-                                退货
-                              </button>
-                              <button
-                                className="btn sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  openSheet('adjust', sku, batch.id)
-                                }}
-                              >
-                                盘点
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      )}
-
-                      <div className="sub-label" style={{ marginTop: 14 }}>
-                        最近流水
-                      </div>
-                      {moves.length === 0 ? (
-                        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '4px 0 2px' }}>还没有流水</div>
-                      ) : (
-                        moves.map((m) => (
-                          <div key={m.id} className="flow-row">
-                            <span>{fmtTime(m.at)}</span>
-                            <span>{TYPE_LABEL[m.type] ?? m.type}</span>
-                            <span className={`flow-qty ${m.qty > 0 ? 'plus' : ''}`}>
-                              {moveText(m.qty, sku.perBox)}
-                            </span>
-                            <span className="flow-ref">{m.ref}</span>
-                          </div>
-                        ))
-                      )}
-
-                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                        <button
-                          className="btn primary sm"
-                          style={{ flex: 1 }}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openSheet('in', sku)
-                          }}
-                        >
-                          + 入库
-                        </button>
-                        <button
-                          className="btn sm"
-                          style={{ flex: 1 }}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const first = batches[0]
-                            if (!first) return toast('还没有批次，先入库')
-                            openSheet('return', sku, first.batch.id)
-                          }}
-                        >
-                          退货入库
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })
-          )}
-        </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+            )
+          })
+        )}
 
         <div className="hint">
           入库、退货、盘点都按箱填，零头件单独填在右边那一格。库存不是直接改的数字，而是每一笔入库、发车、退货、盘点攒出来的。

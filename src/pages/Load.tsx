@@ -134,6 +134,11 @@ function PlanEditor({
     <div className="plan-editor">
       {rows.map((r, i) => {
         const sku = skus.find((s) => s.id === r.skuId)
+        /** 其他行已经选过的品，这一行不能再选（同一品只出现一行） */
+        const usedByOthers = new Set(
+          rows.filter((x) => x.key !== r.key && x.skuId).map((x) => x.skuId),
+        )
+        const availableSkus = skus.filter((s) => !usedByOthers.has(s.id) || s.id === r.skuId)
         /** 这个品有货的生产日期（从新到旧），每个日期还剩多少件 */
         const inStock = r.skuId ? stockByDate(db, r.skuId) : []
         /** 当前选中的日期还剩多少箱 */
@@ -163,12 +168,13 @@ function PlanEditor({
                 disabled={rows.length <= 1}
                 aria-label="删除这一行"
               >
-                <Icon name="close" size={15} />
+                <Icon name="trash" size={16} />
+                <span>删除</span>
               </button>
             </div>
             {skuOpen && (
               <div className="plan-inline">
-                {skus.map((s) => (
+                {availableSkus.map((s) => (
                   <button
                     key={s.id}
                     type="button"
@@ -507,7 +513,7 @@ function overText(over: { x: number; z: number }) {
   const plan = sku ? layerPlan(sku) : null
   const perLayer = plan?.perLayer ?? 0
   const perBox = sku?.perBox || 1
-  const top = perLayer > 0 ? Math.min(Math.max(1, topCount), perLayer) : 0
+  const top = perLayer > 0 ? Math.min(Math.max(0, topCount), perLayer) : 0
   const boxes = sku ? Math.max(0, (layers - 1) * perLayer + top) : 0
   /** 口算式：码的时候随时能对总数 */
   const formula = sku ? layerExpr(layers, perLayer, top) : ''
@@ -845,7 +851,7 @@ function overText(over: { x: number; z: number }) {
                   <span className="lab">顶层</span>
                   <Stepper
                     value={top}
-                    min={1}
+                    min={0}
                     max={perLayer}
                     onChange={setTopCount}
                     onMinus={() => {
@@ -854,8 +860,25 @@ function overText(over: { x: number; z: number }) {
                         setTopCount(perLayer)
                       }
                     }}
+                    onPlus={() => {
+                      // 顶层码满后再按「+」：层数 +1，顶层归 1
+                      if (layers < 24) {
+                        setLayers(layers + 1)
+                        setTopCount(1)
+                      }
+                    }}
                   />
                 </div>
+                <button
+                  type="button"
+                  className="hud-clear"
+                  onClick={() => {
+                    setLayers(1)
+                    setTopCount(0)
+                  }}
+                >
+                  清空
+                </button>
               </div>
             </div>
           )}
@@ -864,7 +887,7 @@ function overText(over: { x: number; z: number }) {
 
       <div className="dock">
         <button className="btn primary" onClick={putOn} disabled={!sku || boxes <= 0 || over > 0 || overPlan}>
-          {editing ? `保存 ${palletLabel}` : '下一板'}
+          {editing ? `保存 ${palletLabel}` : `${nextLabel} 开始装车 · 下一板`}
         </button>
       </div>
     </>
@@ -1233,7 +1256,7 @@ export default function Load() {
               </div>
               <div className="pallet-sub">
                 <span className="pallet-formula">
-                  {layerExpr(p.layers, p.perLayer, p.topCount)} <b>= {boxes} 箱</b>
+                  {p.layers} 层 <b>· {boxes} 箱</b>
                 </span>
                 <span className="pallet-time" title="上车时间">
                   {fmtTime(p.createdAt)}

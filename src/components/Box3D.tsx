@@ -9,6 +9,8 @@ export default function Box3D({
   pallets,
   compact = false,
   emptyPallet = false,
+  hidePallet = false,
+  zoom = 1,
   selected = -1,
   onPick,
 }: {
@@ -16,6 +18,10 @@ export default function Box3D({
   compact?: boolean
   /** 没有货时也画一块空托盘，告诉用户货往哪儿放 */
   emptyPallet?: boolean
+  /** 隐藏托盘（板子）：单箱展示时只看箱子，箱子直接落地、放大占满画面 */
+  hidePallet?: boolean
+  /** 取景放大倍率：>1 时箱子在画面里显得更大（配合单箱展示用） */
+  zoom?: number
   /** 高亮的板索引（-1 无） */
   selected?: number
   /** 点中某块板时回调 */
@@ -44,6 +50,8 @@ export default function Box3D({
         if (cancelled || !holder.current) return
         scene.current = mountBoxes(holder.current, latest.current, {
           emptyPallet,
+          hidePallet,
+          zoom,
           onPick: (i) => onPickRef.current?.(i),
         })
       } catch {

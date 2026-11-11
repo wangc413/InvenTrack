@@ -27,12 +27,50 @@ import hmGreenTop from '../assets/pack/hm-green-top.webp'
 import hmShaoFront from '../assets/pack/hm-shao-front.webp'
 import hmShaoSide from '../assets/pack/hm-shao-side.webp'
 import hmShaoTop from '../assets/pack/hm-shao-top.webp'
+import fuyunFront from '../assets/pack/fuyun-litx-front.webp'
+import fuyunSide from '../assets/pack/fuyun-litx-side.webp'
+import fuyunTop from '../assets/pack/fuyun-litx-top.webp'
+import xlkNuoFront from '../assets/pack/xiaolongkan-nuo-front.webp'
+import xlkNuoSide from '../assets/pack/xiaolongkan-nuo-side.webp'
+import xlkNuoTop from '../assets/pack/xiaolongkan-nuo-top.webp'
+import zhixianglaiFront from '../assets/pack/zhixianglai-front.webp'
+import zhixianglaiSide from '../assets/pack/zhixianglai-side.webp'
+import zhixianglaiTop from '../assets/pack/zhixianglai-top.webp'
+import liqunHuotuiFront from '../assets/pack/liqun-huotui-front.webp'
+import liqunHuotuiSide from '../assets/pack/liqun-huotui-side.webp'
+import liqunZhurouFront from '../assets/pack/liqun-zhurou-front.webp'
+import liqunZhurouSide from '../assets/pack/liqun-zhurou-side.webp'
+import liqunMeigancaiFront from '../assets/pack/liqun-meigancai-front.webp'
+import liqunMeigancaiSide from '../assets/pack/liqun-meigancai-side.webp'
+import maitianxiHongdouFront from '../assets/pack/maitianxi-hongdou-front.webp'
+import maitianxiMeigancaiFront from '../assets/pack/maitianxi-meigancai-front.webp'
+import maitianxiXianzhiFront from '../assets/pack/maitianxi-xianzhi-front.webp'
+import maitianxiXiangguFront from '../assets/pack/maitianxi-xianggu-front.webp'
+import dongxiaobo2p5Front from '../assets/pack/dongxiaobo-2p5-front.webp'
+import dongxiaobo1kgFront from '../assets/pack/dongxiaobo-1kg-front.webp'
+import qinzhiweiXlbFront from '../assets/pack/qinzhiwei-xlb-front.webp'
+import xiaolongkanXlbFront from '../assets/pack/xiaolongkan-xlb-front.webp'
+import laoxianshengNuomiFront from '../assets/pack/laoxiansheng-nuomi-front.webp'
+import zhongkouxianNuomijiFront from '../assets/pack/zhongkouxian-nuomiji-front.webp'
+import zhongkouxianNuomishao50Front from '../assets/pack/zhongkouxian-nuomishao50-front.webp'
+import zhongkouxianNuomishao50Side from '../assets/pack/zhongkouxian-nuomishao50-side.webp'
+import zhongkouxianNuomishao50Top from '../assets/pack/zhongkouxian-nuomishao50-top.webp'
+import zhongkouxianNuomishao70Front from '../assets/pack/zhongkouxian-nuomishao70-front.webp'
+import zhongkouxianNuomishao70Side from '../assets/pack/zhongkouxian-nuomishao70-side.webp'
+import zhongkouxianNuomishao70Top from '../assets/pack/zhongkouxian-nuomishao70-top.webp'
+import zhongkouxianShaomaiFront from '../assets/pack/zhongkouxian-shaomai-front.webp'
+import zhongkouxianShaomaiSide from '../assets/pack/zhongkouxian-shaomai-side.webp'
+import zhongkouxianShaomaiTop from '../assets/pack/zhongkouxian-shaomai-top.webp'
+import zhongkouxianXiangguFront from '../assets/pack/zhongkouxian-xianggu-front.webp'
+import zhongkouxianMeigancaiFront from '../assets/pack/zhongkouxian-meigancai-front.webp'
+import zhongkouxianZhuroubaoFront from '../assets/pack/zhongkouxian-zhuroubao-front.webp'
 
 /**
  * 有外箱稿的品：直接用设计稿裁出来的三张贴图（正面 / 侧面 / 顶面），箱子就是印出来的样子。
+ * top / side 可选：标签类图片只有正面（如麦田喜/众口鲜等），侧面/顶面走示意箱面。
  * 没列在这里的品（比如菜洋洋、自己新建的）仍然走下面代码画出来的示意箱面。
  */
-const PACK_ART: Record<string, { front: string; side: string; top: string }> = {
+const PACK_ART: Record<string, { front: string; side?: string; top?: string }> = {
   // 盒马
   'sku-meat': { front: hmMeatFront, side: hmMeatSide, top: hmMeatTop },
   'sku-green': { front: hmGreenFront, side: hmGreenSide, top: hmGreenTop },
@@ -43,6 +81,37 @@ const PACK_ART: Record<string, { front: string; side: string; top: string }> = {
   'sku-caitianzi-klh': { front: caiFront, side: caiSide, top: caiTop },
   'sku-jiaozi-klh': { front: jiaoFront, side: jiaoSide, top: jiaoTop },
   'sku-nuomiji-klh': { front: nuoFront, side: nuoSide, top: nuoTop },
+  // 烧麦通用外箱 410×270×235（福运立天下 / 小龙坎 / 知享睐，同一刀版换品牌）
+  'sku-fuyunlitianxia-1': { front: fuyunFront, side: fuyunSide, top: fuyunTop },
+  'sku-fuyunlitianxia-2': { front: fuyunFront, side: fuyunSide, top: fuyunTop },
+  'sku-fuyunlitianxia-3': { front: fuyunFront, side: fuyunSide, top: fuyunTop },
+  'sku-fuyunlitianxia-4': { front: fuyunFront, side: fuyunSide, top: fuyunTop },
+  'sku-xiaolongkan-3': { front: xlkNuoFront, side: xlkNuoSide, top: xlkNuoTop },
+  'sku-xiaolongkan-4': { front: xlkNuoFront, side: xlkNuoSide, top: xlkNuoTop },
+  'sku-zhixianglai-1': { front: zhixianglaiFront, side: zhixianglaiSide, top: zhixianglaiTop },
+  // 立群烧麦 395×255×220（正面 + 侧面；顶面只有储运图标，走示意顶面）
+  'sku-liqun-3': { front: liqunMeigancaiFront, side: liqunMeigancaiSide },
+  'sku-liqun-4': { front: liqunHuotuiFront, side: liqunHuotuiSide },
+  'sku-liqun-5': { front: liqunZhurouFront, side: liqunZhurouSide },
+  // 标签类：只有正面标签图，侧面/顶面走示意箱面（普通箱色 + 标签）
+  'sku-maitianxi-3': { front: maitianxiHongdouFront },
+  'sku-maitianxi-4': { front: maitianxiMeigancaiFront },
+  'sku-maitianxi-5': { front: maitianxiXianzhiFront },
+  'sku-maitianxi-6': { front: maitianxiXiangguFront },
+  'sku-dongxiaobo-1': { front: dongxiaobo2p5Front },
+  'sku-dongxiaobo-2': { front: dongxiaobo1kgFront },
+  'sku-qinzhiwei-1': { front: qinzhiweiXlbFront },
+  'sku-qinzhiwei-2': { front: qinzhiweiXlbFront },
+  'sku-xiaolongkan-1': { front: xiaolongkanXlbFront },
+  'sku-xiaolongkan-2': { front: xiaolongkanXlbFront },
+  'sku-laoxiansheng-1': { front: laoxianshengNuomiFront },
+  'sku-zhongkouxian-1': { front: zhongkouxianNuomijiFront },
+  'sku-zhongkouxian-2': { front: zhongkouxianShaomaiFront, side: zhongkouxianShaomaiSide, top: zhongkouxianShaomaiTop },
+  'sku-zhongkouxian-3': { front: zhongkouxianNuomishao50Front, side: zhongkouxianNuomishao50Side, top: zhongkouxianNuomishao50Top },
+  'sku-zhongkouxian-4': { front: zhongkouxianNuomishao70Front, side: zhongkouxianNuomishao70Side, top: zhongkouxianNuomishao70Top },
+  'sku-zhongkouxian-10': { front: zhongkouxianXiangguFront },
+  'sku-zhongkouxian-11': { front: zhongkouxianMeigancaiFront },
+  'sku-zhongkouxian-12': { front: zhongkouxianZhuroubaoFront },
 }
 
 /** 全部按毫米建模，最后统一缩成米 */
@@ -371,8 +440,17 @@ function makePalletMesh(palletL: number, palletW: number, wood: THREE.Material, 
 export function mountBoxes(
   container: HTMLElement,
   pallets: PalletSpec[],
-  opts: { emptyPallet?: boolean; onPick?: (index: number) => void } = {},
+  opts: {
+    emptyPallet?: boolean
+    onPick?: (index: number) => void
+    /** 隐藏托盘（板子）：单箱展示时只看箱子，箱子直接落地、放大占满画面 */
+    hidePallet?: boolean
+    /** 取景放大倍率：>1 时相机更贴近箱子，箱子在画面里更大 */
+    zoom?: number
+  } = {},
 ): SceneHandle {
+  const hidePallet = opts.hidePallet === true
+  const zoom = opts.zoom && opts.zoom > 0 ? opts.zoom : 1
   const scene = new THREE.Scene()
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
@@ -466,6 +544,7 @@ export function mountBoxes(
     if (art) {
       // 设计稿：正面 / 侧面 / 顶面各一张，比例跟真实箱面一致，箱子就是印出来的样子。
       // 同时各画一份示意箱面兜底：webp 加载失败时立刻换上，避免箱子黑成一块。
+      // side / top 可缺省：标签类图片只有正面，缺省的面直接走示意箱面。
       const face = faceTexture(sku)
       const flank = sideTexture(sku)
       const top = topTexture(sku)
@@ -473,14 +552,23 @@ export function mountBoxes(
         map: artTexture(art.front, () => { matFront.map = face; matFront.needsUpdate = true }),
         ...papery,
       })
-      matSide = new THREE.MeshStandardMaterial({
-        map: artTexture(art.side, () => { matSide.map = flank; matSide.needsUpdate = true }),
-        ...papery,
-      })
-      matTop = new THREE.MeshStandardMaterial({
-        map: artTexture(art.top, () => { matTop.map = top; matTop.needsUpdate = true }),
-        roughness: 0.9,
-      })
+      if (art.side) {
+        matSide = new THREE.MeshStandardMaterial({
+          map: artTexture(art.side, () => { matSide.map = flank; matSide.needsUpdate = true }),
+          ...papery,
+        })
+      } else {
+        matSide = new THREE.MeshStandardMaterial({ map: flank, ...papery })
+      }
+      if (art.top) {
+        matTop = new THREE.MeshStandardMaterial({
+          map: artTexture(art.top, () => { matTop.map = top; matTop.needsUpdate = true }),
+          roughness: 0.9,
+        })
+      } else {
+        // 没给顶面贴图（如立群只有正面/侧面），顶面直接用示意
+        matTop = new THREE.MeshStandardMaterial({ map: top, roughness: 0.9 })
+      }
       disposables.push(face, flank, top)
     } else {
       // 自己画：正面是品名，侧面是配料表 + 条码，各贴各的
@@ -538,7 +626,7 @@ export function mountBoxes(
       const depth = p.dot(camDir)
       dist = Math.max(dist, Math.abs(p.dot(right)) / tanH + depth, Math.abs(p.dot(up)) / tanV + depth)
     }
-    dist *= 1.16
+    dist *= 1.16 / zoom
     camera.position.copy(center).addScaledVector(camDir, Math.max(0.3, dist))
     controls.target.copy(center)
     controls.update()
@@ -623,14 +711,17 @@ export function mountBoxes(
       group.position.z = -totalD / 2 + row * (palletW + gap) + palletW / 2
       root.add(group)
 
-      group.add(makePalletMesh(palletL, palletW, wood, woodDark, transient))
+      if (!hidePallet) {
+        group.add(makePalletMesh(palletL, palletW, wood, woodDark, transient))
+      }
 
       const { geo, mats } = assetFor(p.sku)
       // 位置完全照这个品的固定码法来：箱子怎么转、摆在哪，都是写好的
       const plan = layerPlan(p.sku)
       const full = Math.min(Math.max(1, p.perLayer), plan.slots.length)
       const stepH = p.sku.boxH * MM
-      const baseY = PALLET_H * MM
+      // 隐藏托盘时箱子直接落地，不然会悬在托盘面高度上飘着
+      const baseY = hidePallet ? 0 : PALLET_H * MM
       const top = Math.min(p.topCount, full)
 
       for (let layer = 0; layer < p.layers; layer++) {
@@ -680,6 +771,11 @@ export function mountBoxes(
 
   /** 取景尺寸至少留一块托盘，不然只码一层时相机贴得太近，板边都被切掉 */
   function frameBounds() {
+    if (hidePallet) {
+      // 单箱展示：不按托盘撑场，箱子尽量占满画面。矮箱给一点最小高度，避免贴到只剩一条线。
+      size.y = Math.max(size.y, 0.16)
+      return
+    }
     size.x = Math.max(size.x, PALLET_L * MM)
     size.z = Math.max(size.z, PALLET_W * MM)
     size.y = Math.max(size.y, 0.42)

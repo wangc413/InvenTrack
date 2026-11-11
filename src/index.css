@@ -1744,6 +1744,23 @@ textarea.input {
   padding: 0 4px;
 }
 
+/* 档案详情信息行：让长文本（品名/规格）自动换行，不再被右侧截断 */
+.sku-kv .v {
+  max-width: 68%;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* 库存行里的小号件数标注，跟在箱数后面 */
+.stock-sub {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sub);
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 点 3D 里某块板后，底部浮出的大号单板详情卡 */
 .viewer-pick {
   padding: 16px 16px 14px;
@@ -2397,6 +2414,25 @@ textarea.input {
   padding: 0;
 }
 
+/* 清空按钮：把这块板的层数/顶层归零，板上没有箱子 */
+.pack-hud .hud-clear {
+  border: 0;
+  border-radius: 13px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.09);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pack-hud .hud-clear:active {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* 品类标签上的色点 */
 .chip-dot {
   width: 8px;
@@ -2552,26 +2588,29 @@ textarea.input {
   flex: 0 0 auto;
 }
 
-/* 删除某一行（误加品类时删掉） */
+/* 删除某一行（误加品类时删掉）：红色文字按钮，一眼能找到 */
 .plan-del {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  height: 32px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--faint);
+  border-radius: 16px;
+  background: var(--danger-soft, #fdecec);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   cursor: pointer;
 }
 .plan-del:active {
-  background: var(--fill);
-  color: var(--danger);
+  background: var(--danger);
+  color: #fff;
 }
 .plan-del:disabled {
-  opacity: 0.25;
+  opacity: 0.3;
   cursor: default;
 }
 
@@ -3044,13 +3083,13 @@ textarea.input {
   color: var(--sub);
 }
 
-/* 「台账」分组的下拉折叠头 */
+/* 「台账」/「库存客户」分组的下拉折叠头 */
 .group-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: auto;
-  margin: 22px 16px 7px;
+  gap: 8px;
+  width: 100%;
+  margin: 18px 4px 7px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -3058,13 +3097,20 @@ textarea.input {
 }
 
 .group-title {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0;
 }
 
+.group-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--faint);
+}
+
 .group-arrow {
+  margin-left: auto;
   color: var(--sub);
   transition: transform 0.18s ease;
 }

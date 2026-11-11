@@ -52,6 +52,7 @@ export function Stepper({
   min = 0,
   max,
   onMinus,
+  onPlus,
 }: {
   value: number
   onChange: (v: number) => void
@@ -59,9 +60,12 @@ export function Stepper({
   min?: number
   max?: number
   onMinus?: () => void
+  /** 到上限时点「+」不再 disabled，改走这个回调（顶层满层 → 层数 +1、顶层归 1） */
+  onPlus?: () => void
 }) {
   const cap = max ?? Number.POSITIVE_INFINITY
   const atMin = value <= min
+  const atMax = value >= cap
   return (
     <div className="stepper">
       <button
@@ -75,7 +79,14 @@ export function Stepper({
         −
       </button>
       <div className="val num">{value}</div>
-      <button onClick={() => onChange(Math.min(cap, value + step))} aria-label="增加" disabled={value >= cap}>
+      <button
+        onClick={() => {
+          if (atMax) onPlus?.()
+          else onChange(Math.min(cap, value + step))
+        }}
+        aria-label="增加"
+        disabled={atMax && !onPlus}
+      >
         +
       </button>
     </div>

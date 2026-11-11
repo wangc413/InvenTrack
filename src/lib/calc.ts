@@ -258,6 +258,11 @@ function rowsPlan(sku: Sku, want: number): LayerPlan {
  * 只写死一行个数，具体怎么摆还是按箱规算，换箱规不会算出重叠。
  */
 export function layerPlan(sku: Sku): LayerPlan {
+  // 美菜（原众口鲜）烧麦：按箱规固定每层个数，不跟「烧麦 5 个」的默认码法走。
+  // 1kg×10袋 → 10 个一层（同饺子码法）；1.4kg×10袋 → 7 个一层（同包子码法）。
+  if (sku.id === 'sku-zhongkouxian-2') return jiaoziPlan(sku) // 猪肉香菇烧麦 十个一层
+  if (sku.id === 'sku-zhongkouxian-3') return jiaoziPlan(sku) // 50g 糯米烧麦 十个一层
+  if (sku.id === 'sku-zhongkouxian-4') return baoPlan(sku) // 70g 糯米烧麦 7 个一层
   const key = `${sku.name}${sku.shortName}`
   if (/烧麦/.test(key)) return shaomaiPlan(sku)
   if (/饺子|水饺/.test(key)) return jiaoziPlan(sku)
@@ -295,7 +300,8 @@ export function maxLayers(sku: Sku) {
  * 顶层码满就不带尾巴，直接「7 层 × 7 个」；只有一层时也不搞乘法。
  */
 export function layerExpr(layers: number, perLayer: number, topCount: number) {
-  const top = Math.min(Math.max(1, topCount), Math.max(1, perLayer))
+  const top = Math.min(Math.max(0, topCount), Math.max(1, perLayer))
+  if (top <= 0) return '0 个'
   if (layers <= 1) return `1 层 ${top} 个`
   return top >= perLayer ? `${layers} 层 × ${perLayer} 个` : `${layers - 1} 层 × ${perLayer} 个 + 顶层 ${top} 个`
 }

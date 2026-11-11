@@ -134,15 +134,16 @@ export async function parseWorkbook(buf: ArrayBuffer): Promise<{
 
 /** 一行发货明细（从已发货订单派生，供台账视图和导出共用） */
 export type ShipLine = {
+  orderNo: string // 车次单号（FHxxxxxx），同一车同一品合并成一行
   date: string // 发货日期 YYYY-MM-DD
   customer: string // 客户/收货方名称
   product: string // 品名
   spec: string // 规格
   prodDate: string // 生产日期
   boxes: number // 箱数（件）
-  /** 发车前这一刻，这个「品名 + 生产日期」账上还剩多少箱（库存数量） */
+  /** 这个「品名 + 生产日期」的累计入库总箱数（库存数量，不随发货递减） */
   before: number
-  /** 发车后的剩余 = 库存数量 - 当日出库（结存） */
+  /** 累计入库 − 累计出库的剩余箱数（结存） */
   after: number
 }
 
@@ -150,19 +151,20 @@ export type ShipLine = {
  * 从发货订单派生出库台账/装车记录的明细行。
  * 只统计已发货（shipped）的订单。
  *
- * 库存数量 / 结存按「品名 + 生产日期」逐日滚动推算：
- * 把该品该日期的入库流水按时间累计成「期初库存」，再按发货先后逐行扣减——
- * 每行的「库存数量」= 发车前剩余，「结存」= 库存数量 - 当日出库；
- * 下一行的库存数量接上一行的结存，如此滚动（库存数量 = 当日出库 + 结存）。
+ * 库存数量 / 结存按「品名 + 生产日期」推算：
+ * 「库存数量」= 该品该日期的累计入库总箱数（固定，不随发货递减）；
+ * 「结存」= 累计入库 − 累计出库（截至该行的当前剩余箱数）。
  */
 export function buildShipLines(db: {
-  orders: { status: string; destination: string; customerId: string; createdAt: number; pallets: { skuId: string; prodDate: string; layers: number; perLayer: number; topCount: number }[] }[]
+  orders: { no: string; status: string; destination: string; customerId: string; createdAt: number; pallets: { skuId: string; prodDate: string; layers: number; perLayer: number; topCount: number }[] }[]
   customers: { id: string; name: string }[]
   skus: { id: string; name: string; spec: string; perBox: number }[]
   moves?: { type: string; at: number; skuId: string; batchId?: string; qty: number; voided?: boolean }[]
   batches?: { id: string; skuId: string; prodDate: string }[]
 }): ShipLine[] {
   const lines: ShipLine[] = []
+  // 同一车 + 同一品 + 同一生产日期的多板合并成一行（装车数量 = 整车该品的总箱数）
+  const agg = new Map<string, ShipLine>()
   for (const o of db.orders) {
     if (o.status !== 'shipped') continue
     const customer = db.customers.find((c) => c.id === o.customerId)
@@ -170,18 +172,26 @@ export function buildShipLines(db: {
       const sku = db.skus.find((s) => s.id === p.skuId)
       if (!sku) continue
       const boxes = Math.max(0, (Math.max(1, p.layers) - 1) * Math.max(1, p.perLayer) + Math.max(0, p.topCount))
-      lines.push({
-        date: new Date(o.createdAt).toISOString().slice(0, 10),
-        customer: customer?.name || o.destination,
-        product: sku.name,
-        spec: sku.spec,
-        prodDate: p.prodDate,
-        boxes,
-        before: 0,
-        after: 0,
-      })
+      const key = `${o.no}|${sku.id}|${p.prodDate}`
+      const cur = agg.get(key)
+      if (cur) {
+        cur.boxes += boxes
+      } else {
+        agg.set(key, {
+          orderNo: o.no,
+          date: new Date(o.createdAt).toISOString().slice(0, 10),
+          customer: customer?.name || o.destination,
+          product: sku.name,
+          spec: sku.spec,
+          prodDate: p.prodDate,
+          boxes,
+          before: 0,
+          after: 0,
+        })
+      }
     }
   }
+  lines.push(...agg.values())
   lines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 
   // —— 逐「品名 + 生产日期」推算库存数量 / 结存 ——
@@ -191,30 +201,38 @@ export function buildShipLines(db: {
   const batchProdDate = new Map((db.batches ?? []).filter((b) => b && b.id).map((b) => [b.id, b.prodDate]))
   const flowKey = (skuId: string, prodDate: string) => `${skuId}|${prodDate}`
 
-  // 期初总入库（件）：只累加「入库/回补/正调整」等正数入账，不含出库负数。
-  // 出库由下面逐行扣减，避免重复。
-  const initStock = new Map<string, number>()
+  // 累计入库（件）：入库 / 回补 / 正调整；累计出库（件）：出库 / 负调整。
+  // 「库存数量」= 累计入库总箱数（固定，不随发货递减）；「结存」= 累计入库 − 累计出库。
+  const totalIn = new Map<string, number>()
+  const totalOut = new Map<string, number>()
   for (const m of db.moves ?? []) {
     if (m.voided || !m.qty) continue
-    if (m.type === 'out') continue // 出库不在期初里算，逐行滚动扣
     const prodDate = (m.batchId ? batchProdDate.get(m.batchId) : undefined) ?? ''
     const key = flowKey(m.skuId, prodDate)
-    initStock.set(key, (initStock.get(key) ?? 0) + m.qty)
+    if (m.type === 'out') {
+      totalOut.set(key, (totalOut.get(key) ?? 0) + Math.abs(m.qty))
+    } else if (m.type === 'adjust') {
+      if (m.qty > 0) totalIn.set(key, (totalIn.get(key) ?? 0) + m.qty)
+      else totalOut.set(key, (totalOut.get(key) ?? 0) + Math.abs(m.qty))
+    } else {
+      // in / return 都算入库存
+      totalIn.set(key, (totalIn.get(key) ?? 0) + m.qty)
+    }
   }
 
-  // 逐行滚动：同一 sku+日期，结存接续；发车前剩余 = 上一次结存（首行=期初总入库）
-  const running = new Map<string, number>() // key -> 发车前剩余件数
+  // 逐行：库存数量固定 = 累计入库；结存随累计出库递减
+  const outRunning = new Map<string, number>() // key -> 截至该行的累计出库件数
   for (const l of lines) {
     const skuMatch = db.skus.find((s) => s.name === l.product && s.spec === l.spec)
     if (!skuMatch) continue
     const key = flowKey(skuMatch.id, l.prodDate)
     const perBox = perBoxOf.get(skuMatch.id) ?? 1
-    let beforePcs = running.get(key)
-    if (beforePcs === undefined) beforePcs = initStock.get(key) ?? 0
-    l.before = Math.max(0, Math.round(beforePcs / perBox))
-    const afterPcs = beforePcs - l.boxes * perBox
-    l.after = Math.max(0, Math.round(afterPcs / perBox))
-    running.set(key, afterPcs)
+    const inPcs = totalIn.get(key) ?? 0
+    const outBefore = outRunning.get(key) ?? 0
+    const outAfter = outBefore + l.boxes * perBox
+    outRunning.set(key, outAfter)
+    l.before = Math.max(0, Math.round(inPcs / perBox))
+    l.after = Math.max(0, Math.round((inPcs - outAfter) / perBox))
   }
 
   return lines

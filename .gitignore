@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+node_modules.bak
 dist
 dist-ssr
 *.local
@@ -27,3 +28,4 @@ dist-ssr
 .workbuddy/edge-*/
 .workbuddy/shots/
 .workbuddy/*.mjs
+.workbuddy/memory/

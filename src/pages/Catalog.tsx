@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
   removeCustomer,
-  removeSku,
   saveCustomer,
   stockOf,
   updateCustomer,
@@ -9,7 +8,7 @@ import {
   type Customer,
   type Sku,
 } from '../lib/store'
-import SkuForm from '../components/SkuForm'
+import SkuDetail from './SkuDetail'
 import { boxText, layerPlan } from '../lib/calc'
 import { Icon, Sheet, toast } from '../components/UI'
 
@@ -85,8 +84,7 @@ function CustomerSheet({
 
 export default function Catalog() {
   const db = useDB()
-  const [open, setOpen] = useState(false)
-  const [editing, setEditing] = useState<Sku | null>(null)
+  const [viewing, setViewing] = useState<Sku | null>(null)
   const [custOpen, setCustOpen] = useState(false)
   const [custEditing, setCustEditing] = useState<Customer | null>(null)
 
@@ -99,17 +97,7 @@ export default function Catalog() {
     <>
       <header className="topbar">
         <h1>品项档案</h1>
-        <button
-          className="icon-btn"
-          onClick={() => {
-            setEditing(null)
-            setOpen(true)
-          }}
-          aria-label="新增品项"
-        >
-          <Icon name="plus" size={20} />
-        </button>
-        <p className="sub">箱规、每箱件数和箱面配色，3D 装箱图按这些来画</p>
+        <p className="sub">点开品项看它的外箱和规格，对着现场核对</p>
       </header>
 
       <main className="page">
@@ -133,10 +121,7 @@ export default function Catalog() {
                     <div
                       className="row"
                       key={s.id}
-                      onClick={() => {
-                        setEditing(s)
-                        setOpen(true)
-                      }}
+                      onClick={() => setViewing(s)}
                     >
                       <span className="pick-swatch" style={{ background: s.accentColor, height: 30 }} />
                       <div className="grow">
@@ -189,27 +174,11 @@ export default function Catalog() {
         </section>
 
         <div className="hint">
-          箱规照外箱稿上的「长*宽*高（外径）」填，单位毫米。填得越准，3D 装箱图和装车数越靠谱。
-          客户可以随时加，装车时填的「收货方」就是这里列出来的这些。
+          点开品项看它的外箱和体积，对着现场核对。客户可以随时加，装车时填的「收货方」就是这里列出来的这些。
         </div>
       </main>
 
-      <SkuForm
-        open={open}
-        initial={editing}
-        onClose={() => setOpen(false)}
-        onDelete={
-          editing
-            ? () => {
-                if (confirm(`删除「${editing.name}」及其所有批次？`)) {
-                  removeSku(editing.id)
-                  setOpen(false)
-                  toast('已删除')
-                }
-              }
-            : undefined
-        }
-      />
+      {viewing && <SkuDetail sku={viewing} onClose={() => setViewing(null)} />}
 
       <CustomerSheet open={custOpen} initial={custEditing} onClose={() => setCustOpen(false)} />
     </>
