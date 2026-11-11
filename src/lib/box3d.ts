@@ -64,6 +64,12 @@ import zhongkouxianShaomaiTop from '../assets/pack/zhongkouxian-shaomai-top.webp
 import zhongkouxianXiangguFront from '../assets/pack/zhongkouxian-xianggu-front.webp'
 import zhongkouxianMeigancaiFront from '../assets/pack/zhongkouxian-meigancai-front.webp'
 import zhongkouxianZhuroubaoFront from '../assets/pack/zhongkouxian-zhuroubao-front.webp'
+import zhenglaisiFront from '../assets/pack/zhenglaisi-front.webp'
+import zhenglaisiSide from '../assets/pack/zhenglaisi-side.webp'
+import zhenglaisiTop from '../assets/pack/zhenglaisi-top.webp'
+import zhenglaisi35Front from '../assets/pack/zhenglaisi-35-front.webp'
+import zhenglaisi35Side from '../assets/pack/zhenglaisi-35-side.webp'
+import zhenglaisi35Top from '../assets/pack/zhenglaisi-35-top.webp'
 
 /**
  * 有外箱稿的品：直接用设计稿裁出来的三张贴图（正面 / 侧面 / 顶面），箱子就是印出来的样子。
@@ -112,6 +118,9 @@ const PACK_ART: Record<string, { front: string; side?: string; top?: string }> =
   'sku-zhongkouxian-10': { front: zhongkouxianXiangguFront },
   'sku-zhongkouxian-11': { front: zhongkouxianMeigancaiFront },
   'sku-zhongkouxian-12': { front: zhongkouxianZhuroubaoFront },
+  // 蒸来思烧麦：1kg 箱 410×270×235（绿白配色）/ 3.5kg 箱 410×320×255（黄色底），各三视图
+  'sku-zhenglaisi-1': { front: zhenglaisiFront, side: zhenglaisiSide, top: zhenglaisiTop },
+  'sku-zhenglaisi-2': { front: zhenglaisi35Front, side: zhenglaisi35Side, top: zhenglaisi35Top },
 }
 
 /** 全部按毫米建模，最后统一缩成米 */

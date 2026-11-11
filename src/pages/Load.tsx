@@ -17,11 +17,12 @@ import {
   DEFAULT_PER_LAYER,
   addPallet,
   createOrder,
-  customerById,
   getState,
   loadedBoxes,
   nickOf,
   normalizePlan,
+  orderCustomerIds,
+  orderCustomerNames,
   palletBoxes,
   planSummary,
   plannedBoxes,
@@ -29,7 +30,7 @@ import {
   removePallet,
   shipOrder,
   shortages,
-  skusOfCustomer,
+  skusOfCustomers,
   stockByDate,
   stockOfDate,
   updateOrder,
@@ -104,16 +105,16 @@ const linesToRows = (lines: PlanLine[]): PlanRow[] =>
  */
 function PlanEditor({
   db,
-  customerId,
+  customerIds,
   rows,
   onChange,
 }: {
   db: ReturnType<typeof useDB>
-  customerId: string
+  customerIds: string[]
   rows: PlanRow[]
   onChange: (rows: PlanRow[]) => void
 }) {
-  const skus = customerId ? skusOfCustomer(db, customerId) : []
+  const skus = customerIds.length > 0 ? skusOfCustomers(db, customerIds) : []
   const set = (key: string, patch: Partial<PlanRow>) =>
     onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
   /** 删掉一行：至少留一行（全删光就不方便再加了） */
@@ -134,13 +135,18 @@ function PlanEditor({
     <div className="plan-editor">
       {rows.map((r, i) => {
         const sku = skus.find((s) => s.id === r.skuId)
-        /** 其他行已经选过的品，这一行不能再选（同一品只出现一行） */
-        const usedByOthers = new Set(
-          rows.filter((x) => x.key !== r.key && x.skuId).map((x) => x.skuId),
-        )
-        const availableSkus = skus.filter((s) => !usedByOthers.has(s.id) || s.id === r.skuId)
+        /** 这个品归哪个客户 */
+        const skuCustomer = sku ? db.customers.find((c) => c.id === sku.customerId) : null
+        /** 同一个品可以在多行重复选（不同生产日期拆多行），所以这里只排除「本行已选」以外的同品重复没意义，不再按品去重 */
+        const availableSkus = skus
         /** 这个品有货的生产日期（从新到旧），每个日期还剩多少件 */
         const inStock = r.skuId ? stockByDate(db, r.skuId) : []
+        /** 同品在其他行已经选过的日期（同品同日期才需要避免重复） */
+        const datesUsedElsewhere = new Set(
+          rows
+            .filter((x) => x.key !== r.key && x.skuId === r.skuId && x.prodDate)
+            .map((x) => x.prodDate),
+        )
         /** 当前选中的日期还剩多少箱 */
         const dateLeft = sku && r.prodDate ? Math.floor(stockOfDate(db, r.skuId, r.prodDate) / (sku.perBox || 1)) : 0
         const boxes = Number(r.boxes) || 0
@@ -159,6 +165,11 @@ function PlanEditor({
               >
                 {sku && <span className="dot" style={{ background: sku.accentColor }} />}
                 <b>{sku ? nickOf(sku) : '选品'}</b>
+                {sku && skuCustomer && (
+                  <em className="chip-sub" style={{ marginLeft: 6 }}>
+                    {skuCustomer.short}
+                  </em>
+                )}
                 <i className="caret" />
               </button>
               <button
@@ -186,6 +197,10 @@ function PlanEditor({
                   >
                     <span className="chip-dot" style={{ background: s.accentColor }} />
                     {nickOf(s)}
+                    {(() => {
+                      const cc = db.customers.find((c) => c.id === s.customerId)
+                      return cc ? <em className="chip-sub">{cc.short}</em> : null
+                    })()}
                     {r.skuId === s.id && <Icon name="check" size={16} />}
                   </button>
                 ))}
@@ -221,21 +236,25 @@ function PlanEditor({
             {dateOpen && (
               <div className="plan-inline">
                 {inStock.length > 0 ? (
-                  inStock.map((d) => (
-                    <button
-                      key={d.prodDate}
-                      type="button"
-                      className={`chip ${r.prodDate === d.prodDate ? 'on' : ''}`}
-                      onClick={() => {
-                        set(r.key, { prodDate: d.prodDate })
-                        close()
-                      }}
-                    >
-                      {fmtDate(d.prodDate)}
-                      <em className="chip-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
-                      {r.prodDate === d.prodDate && <Icon name="check" size={16} />}
-                    </button>
-                  ))
+                  inStock.map((d) => {
+                    const taken = datesUsedElsewhere.has(d.prodDate)
+                    return (
+                      <button
+                        key={d.prodDate}
+                        type="button"
+                        className={`chip ${r.prodDate === d.prodDate ? 'on' : ''} ${taken ? 'off' : ''}`}
+                        disabled={taken}
+                        onClick={() => {
+                          set(r.key, { prodDate: d.prodDate })
+                          close()
+                        }}
+                      >
+                        {fmtDate(d.prodDate)}
+                        <em className="chip-sub">{Math.floor(d.left / (sku?.perBox || 1))} 箱</em>
+                        {taken ? <span className="chip-sub">已选</span> : r.prodDate === d.prodDate ? <Icon name="check" size={16} /> : null}
+                      </button>
+                    )
+                  })
                 ) : (
                   <div className="hint">这个品还没入库，先去「库存」页录入</div>
                 )}
@@ -297,22 +316,29 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
   }, [db.orders])
 
   const [destination, setDestination] = useState('')
-  const [customerId, setCustomerId] = useState('')
+  const [customerIds, setCustomerIds] = useState<string[]>([])
   const [planRows, setPlanRows] = useState<PlanRow[]>([emptyRow()])
   /** 收货方下拉弹层开关 */
   const [customerOpen, setCustomerOpen] = useState(false)
 
-  /** 换收货方时，把不属于新收货方的品清掉，免得串货 */
-  const pickCustomer = (id: string) => {
-    setCustomerId(id)
-    const allowed = new Set(skusOfCustomer(db, id).map((s) => s.id))
-    setPlanRows((rows) => rows.map((r) => (allowed.has(r.skuId) ? r : { ...r, skuId: '' })))
+  /** 切换某个收货方：勾上/取消。取消一个收货方时，把它名下的品清掉，免得串货 */
+  const toggleCustomer = (id: string) => {
+    setCustomerIds((ids) => {
+      const on = ids.includes(id)
+      const next = on ? ids.filter((x) => x !== id) : [...ids, id]
+      if (on) {
+        // 移除该客户：把还留在其他已选客户里的品保留，其余清空
+        const allowed = new Set(skusOfCustomers(db, next).map((s) => s.id))
+        setPlanRows((rows) => rows.map((r) => (allowed.has(r.skuId) ? r : { ...r, skuId: '' })))
+      }
+      return next
+    })
   }
 
   const create = () => {
     const dest = destination.trim()
     if (!dest) return toast('先填收货地')
-    if (!customerId) return toast('先选收货方')
+    if (customerIds.length === 0) return toast('先选收货方')
     const filled = planRows.filter((r) => r.skuId || r.prodDate || r.boxes)
     if (filled.some((r) => !r.skuId || !r.prodDate || !(Number(r.boxes) > 0)))
       return toast('要货计划有没填全的行：品、日期、箱数都要填')
@@ -325,7 +351,12 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
         return toast(`${nickOf(sku)} ${fmtDate(r.prodDate)} 只剩 ${left} 箱，箱数填超了`)
     }
     rememberDestination(dest)
-    const id = createOrder({ destination: dest, customerId, plan: rowsToLines(filled) })
+    const id = createOrder({
+      destination: dest,
+      customerId: customerIds[0],
+      customerIds,
+      plan: rowsToLines(filled),
+    })
     onCreated(id)
   }
 
@@ -365,10 +396,16 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
         <div className="card card-pad" style={{ marginTop: 8, overflow: 'visible' }}>
           <button
             type="button"
-            className={`plan-pick plan-customer-pick ${customerId ? '' : 'placeholder'}`}
+            className={`plan-pick plan-customer-pick ${customerIds.length > 0 ? '' : 'placeholder'}`}
             onClick={() => setCustomerOpen((v) => !v)}
           >
-            <b>{customerId ? (db.customers.find((c) => c.id === customerId)?.name ?? '收货方') : '收货方'}</b>
+            <b>
+              {customerIds.length > 0
+                ? customerIds
+                    .map((id) => db.customers.find((c) => c.id === id)?.name ?? '收货方')
+                    .join('、')
+                : '收货方（可多选混拼）'}
+            </b>
             <i className="caret" />
           </button>
           {customerOpen && (
@@ -377,23 +414,20 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
                 <button
                   key={c.id}
                   type="button"
-                  className={`chip ${customerId === c.id ? 'on' : ''}`}
-                  onClick={() => {
-                    pickCustomer(c.id)
-                    setCustomerOpen(false)
-                  }}
+                  className={`chip ${customerIds.includes(c.id) ? 'on' : ''}`}
+                  onClick={() => toggleCustomer(c.id)}
                 >
                   {c.name}
-                  {customerId === c.id && <Icon name="check" size={16} />}
+                  {customerIds.includes(c.id) && <Icon name="check" size={16} />}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {customerId && (
+        {customerIds.length > 0 && (
           <div className="card card-pad" style={{ marginTop: 8, overflow: 'visible' }}>
-            <PlanEditor db={db} customerId={customerId} rows={planRows} onChange={setPlanRows} />
+            <PlanEditor db={db} customerIds={customerIds} rows={planRows} onChange={setPlanRows} />
           </div>
         )}
 
@@ -401,7 +435,11 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
       </div>
 
       <div className="dock">
-        <button className="btn primary" onClick={create} disabled={!destination.trim() || !customerId}>
+        <button
+          className="btn primary"
+          onClick={create}
+          disabled={!destination.trim() || customerIds.length === 0}
+        >
           创建并开始装板
         </button>
       </div>
@@ -434,7 +472,7 @@ function PlanEditPage({ order, onCancel, onSaved }: { order: Order; onCancel: ()
           <p className="sub">{order.destination} · {order.no}</p>
         </header>
         <div className="card card-pad">
-          <PlanEditor db={db} customerId={order.customerId} rows={rows} onChange={setRows} />
+          <PlanEditor db={db} customerIds={orderCustomerIds(order)} rows={rows} onChange={setRows} />
         </div>
         <div style={{ height: 12 }} />
       </div>
@@ -463,7 +501,7 @@ function PackingBoard({
   onBack: () => void
 }) {
   const db = useDB()
-  const skus = skusOfCustomer(db, order.customerId)
+  const skus = skusOfCustomers(db, orderCustomerIds(order))
   const planLines = order.plan ?? []
   const ps = planSummary(order)
   const planSkuIds = new Set(planLines.map((l) => l.skuId))
@@ -921,7 +959,7 @@ export function Viewer3D({
   if (!open || !order) return null
   const spec = specOfOrder(db, order)
   const sum = summarize(db, order)
-  const customer = customerById(db, order.customerId)
+  const customerNames = orderCustomerNames(db, order)
   const sel = order.pallets[selected] ?? null
   const selSku = sel ? db.skus.find((s) => s.id === sel.skuId) : null
   const selBoxes = sel ? palletBoxes(sel) : 0
@@ -935,7 +973,7 @@ export function Viewer3D({
         <div className="viewer-title">
           <b>{order.destination}</b>
           <em>
-            {customer?.name ?? '—'} · {sum.totalPallets} 板 · {sum.totalBoxes} 箱
+            {customerNames} · {sum.totalPallets} 板 · {sum.totalBoxes} 箱
           </em>
         </div>
       </div>
@@ -1142,7 +1180,7 @@ export default function Load() {
     )
   }
 
-  const customer = customerById(db, draft.customerId)
+  const customerNames = orderCustomerNames(db, draft)
   const ps = planSummary(draft)
 
   return (
@@ -1151,7 +1189,7 @@ export default function Load() {
         <header className="topbar">
           <h1>{draft.destination}</h1>
           <p className="sub">
-            {customer?.name ?? '—'} · {draft.no}
+            {customerNames} · {draft.no}
           </p>
           <button
             className="icon-btn"

@@ -156,7 +156,7 @@ export type ShipLine = {
  * 「结存」= 累计入库 − 累计出库（截至该行的当前剩余箱数）。
  */
 export function buildShipLines(db: {
-  orders: { no: string; status: string; destination: string; customerId: string; createdAt: number; pallets: { skuId: string; prodDate: string; layers: number; perLayer: number; topCount: number }[] }[]
+  orders: { no: string; status: string; destination: string; customerId: string; customerIds?: string[]; createdAt: number; pallets: { skuId: string; prodDate: string; layers: number; perLayer: number; topCount: number }[] }[]
   customers: { id: string; name: string }[]
   skus: { id: string; name: string; spec: string; perBox: number }[]
   moves?: { type: string; at: number; skuId: string; batchId?: string; qty: number; voided?: boolean }[]
@@ -167,7 +167,9 @@ export function buildShipLines(db: {
   const agg = new Map<string, ShipLine>()
   for (const o of db.orders) {
     if (o.status !== 'shipped') continue
-    const customer = db.customers.find((c) => c.id === o.customerId)
+    const ids = o.customerIds && o.customerIds.length > 0 ? o.customerIds : o.customerId ? [o.customerId] : []
+    const idSet = new Set(ids)
+    const customer = db.customers.filter((c) => idSet.has(c.id)).map((c) => c.name).join('、')
     for (const p of o.pallets) {
       const sku = db.skus.find((s) => s.id === p.skuId)
       if (!sku) continue
@@ -180,7 +182,7 @@ export function buildShipLines(db: {
         agg.set(key, {
           orderNo: o.no,
           date: new Date(o.createdAt).toISOString().slice(0, 10),
-          customer: customer?.name || o.destination,
+          customer: customer || o.destination,
           product: sku.name,
           spec: sku.spec,
           prodDate: p.prodDate,

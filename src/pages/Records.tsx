@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Icon, toast } from '../components/UI'
 import { fmt, fmtDate, fmtTime, summarize } from '../lib/calc'
-import { customerById, nickOf, unshipOrder, useDB } from '../lib/store'
+import { nickOf, orderCustomerNames, unshipOrder, useDB } from '../lib/store'
 import { Viewer3D } from './Load'
 
 export default function Records() {
@@ -44,7 +44,7 @@ export default function Records() {
 
         {shipped.map((o) => {
           const sum = summarize(db, o)
-          const customer = customerById(db, o.customerId)
+          const customerName = orderCustomerNames(db, o)
           return (
             <button key={o.id} className="card card-pad rec-card" onClick={() => setOpenId(o.id)}>
               <div className="rec-head">
@@ -52,7 +52,7 @@ export default function Records() {
                 <span className="rec-time">{fmtTime(o.createdAt)}</span>
               </div>
               <div className="rec-meta">
-                <span className="chip-mini">{customer?.name ?? '—'}</span>
+                <span className="chip-mini">{customerName}</span>
                 <span>{sum.totalPallets} 板</span>
                 <span>{sum.totalBoxes} 箱</span>
                 <span>{fmt(sum.totalVolume, 2)} m³</span>

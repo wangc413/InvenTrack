@@ -103,7 +103,10 @@ export type Order = {
   no: string
   /** 收货地，必填 */
   destination: string
+  /** 旧：单个收货方。保留以兼容老数据 */
   customerId: string
+  /** 新：可多选收货方（混拼）。老车次没有这个字段就走 customerId */
+  customerIds?: string[]
   remark: string
   createdAt: number
   status: 'draft' | 'shipped'
@@ -186,7 +189,7 @@ export const KLH_STOCK_DAYS = [4, 2]
 export const KLH_STOCK_BOXES = 100
 
 /** 数据版本：升级时靠它判断要不要补示例数据 */
-const DATA_VERSION = 12
+const DATA_VERSION = 14
 
 function seed(): DB {
   const customers: Customer[] = [
@@ -195,6 +198,7 @@ function seed(): DB {
     { id: CUSTOMER_CYY, name: '菜洋洋', short: '菜洋洋' },
     // —— 以下按 2026 年成品冷库生产入库登记表 补充的品牌（收货方）——
     { id: 'c-meicai', name: '美菜', short: '美菜' },
+    { id: 'c-zhenglaisi', name: '蒸来思', short: '蒸来思' },
     { id: 'c-lengfeng', name: '冷丰', short: '冷丰' },
     { id: 'c-qiyao', name: '启肴', short: '启肴' },
     { id: 'c-weierxian', name: '味儿鲜', short: '味儿鲜' },
@@ -217,7 +221,6 @@ function seed(): DB {
     { id: 'c-liqun', name: '立群', short: '立群' },
     { id: 'c-hangzhoumeishi', name: '航舟美时', short: '航舟美时' },
     { id: 'c-sujie', name: '苏杰', short: '苏杰' },
-    { id: 'c-zhenglaisi', name: '蒸来思', short: '蒸来思' },
     { id: 'c-huochu', name: '霍厨', short: '霍厨' },
     { id: 'c-xianbaite', name: '鲜佰特', short: '鲜佰特' },
     { id: 'c-maitianxi', name: '麦田喜', short: '麦田喜' },
@@ -453,8 +456,8 @@ function seed(): DB {
     mk({ id: 'sku-cyy-8', name: '菜洋洋80g香菇青菜包', shortName: '80g香菇青菜包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
     mk({ id: 'sku-cyy-9', name: '菜洋洋80g鲜汁肉包', shortName: '80g鲜汁肉包', spec: '1*800g*10袋', customerId: 'c-cyy' }),
     mk({ id: 'sku-cyy-10', name: '菜洋洋火腿玉米烧麦', shortName: '火腿玉米烧麦', spec: '1*1kg*10袋', customerId: 'c-cyy' }),
-    mk({ id: 'sku-zhenglaisi-1', name: '蒸来思50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-zhenglaisi' }),
-    mk({ id: 'sku-zhenglaisi-2', name: '蒸来思70g糯米烧麦', shortName: '70g糯米烧麦', spec: '1*3.5kg*4袋', customerId: 'c-zhenglaisi' }),
+    mk({ id: 'sku-zhenglaisi-1', name: '蒸来思50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-zhenglaisi', boxL: 410, boxW: 270, boxH: 235, boxColor: '#3f8f4e', accentColor: '#2f7a3d', textColor: '#ffffff' }),
+    mk({ id: 'sku-zhenglaisi-2', name: '蒸来思70g糯米烧麦', shortName: '70g糯米烧麦', spec: '1*3.5kg*4袋', customerId: 'c-zhenglaisi', boxL: 410, boxW: 320, boxH: 255, boxColor: '#e8b84b', accentColor: '#d8902f', textColor: '#5a2a00' }),
     mk({ id: 'sku-huochu-1', name: '霍厨50g糯米烧麦', shortName: '50g糯米烧麦', spec: '1*1kg*10袋', customerId: 'c-huochu' }),
     mk({ id: 'sku-huochu-2', name: '霍厨70g糯米烧麦', shortName: '70g糯米烧麦', spec: '1*3.5kg*4袋', customerId: 'c-huochu' }),
     mk({ id: 'sku-xianbaite-1', name: '鲜佰特50g猪肉香菇烧麦', shortName: '50g猪肉香菇烧麦', spec: '1*1kg*10袋', customerId: 'c-xianbaite' }),
@@ -806,6 +809,71 @@ function migrate(raw: Record<string, unknown>): DB {
     // 删掉两个旧客户定义
     for (let i = customers.length - 1; i >= 0; i--) {
       if (isMerged(customers[i])) customers.splice(i, 1)
+    }
+  }
+
+  // v13：蒸来思发货频次高，把「蒸来思」收货方提到「美菜」后边，并给两个品补上真实箱规配色。
+  if (version < 13) {
+    // 1) 确保「蒸来思」客户存在
+    if (!customers.some((c) => c.id === 'c-zhenglaisi')) {
+      const zc = base.customers.find((c) => c.id === 'c-zhenglaisi')
+      customers.push(zc ?? { id: 'c-zhenglaisi', name: '蒸来思', short: '蒸来思' })
+    }
+    // 2) 把「蒸来思」从当前位置移到「美菜」后边（只动它自己，不碰其他客户顺序）
+    const zidx = customers.findIndex((c) => c.id === 'c-zhenglaisi')
+    if (zidx >= 0) {
+      const zc = customers.splice(zidx, 1)[0]
+      const midx = customers.findIndex((c) => c.id === 'c-meicai')
+      customers.splice(midx >= 0 ? midx + 1 : 0, 0, zc)
+    }
+    // 3) 蒸来思两个品的真实箱规 + 配色
+    const zlsSpecs: Record<string, [number, number, number, string, string, string]> = {
+      'sku-zhenglaisi-1': [410, 270, 235, '#3f8f4e', '#2f7a3d', '#ffffff'],
+      'sku-zhenglaisi-2': [410, 320, 255, '#e8b84b', '#d8902f', '#5a2a00'],
+    }
+    for (const [id, [l, w, h, boxColor, accentColor, textColor]] of Object.entries(zlsSpecs)) {
+      const sku = skus.find((x) => x.id === id)
+      if (!sku) continue
+      sku.boxL = l
+      sku.boxW = w
+      sku.boxH = h
+      sku.boxColor = boxColor
+      sku.accentColor = accentColor
+      sku.textColor = textColor
+    }
+  }
+
+  // v14：重排「蒸来思」到「美菜」后边（按 name 匹配，不依赖 id，兼容本地数据里美菜 id 对不上的情况）。
+  // v13 已经做过一次，但当时用户本地若已跑到 v13 就不会再触发；这里再按 name 兜底重排一次，保证顺序归位。
+  if (version < 14) {
+    // 确保蒸来思客户存在
+    if (!customers.some((c) => c.id === 'c-zhenglaisi' || c.name === '蒸来思')) {
+      const zc = base.customers.find((c) => c.id === 'c-zhenglaisi')
+      customers.push(zc ?? { id: 'c-zhenglaisi', name: '蒸来思', short: '蒸来思' })
+    }
+    // 找到蒸来思和美菜（按 id 或 name 匹配）
+    const zidx = customers.findIndex((c) => c.id === 'c-zhenglaisi' || c.name === '蒸来思')
+    const midx = customers.findIndex((c) => c.id === 'c-meicai' || c.name === '美菜')
+    if (zidx >= 0 && zidx !== midx + 1) {
+      const zc = customers.splice(zidx, 1)[0]
+      // 重新找美菜位置（splice 后索引可能变）
+      const m2 = customers.findIndex((c) => c.id === 'c-meicai' || c.name === '美菜')
+      customers.splice(m2 >= 0 ? m2 + 1 : 0, 0, zc)
+    }
+    // 再兜底补一次蒸来思箱规配色（幂等，已对的不会改坏）
+    const zlsSpecs: Record<string, [number, number, number, string, string, string]> = {
+      'sku-zhenglaisi-1': [410, 270, 235, '#3f8f4e', '#2f7a3d', '#ffffff'],
+      'sku-zhenglaisi-2': [410, 320, 255, '#e8b84b', '#d8902f', '#5a2a00'],
+    }
+    for (const [id, [l, w, h, boxColor, accentColor, textColor]] of Object.entries(zlsSpecs)) {
+      const sku = skus.find((x) => x.id === id)
+      if (!sku) continue
+      sku.boxL = l
+      sku.boxW = w
+      sku.boxH = h
+      sku.boxColor = boxColor
+      sku.accentColor = accentColor
+      sku.textColor = textColor
     }
   }
 
@@ -1329,6 +1397,7 @@ export function normalizePlan(lines: PlanLine[] | undefined): PlanLine[] {
 export function createOrder(input: {
   destination: string
   customerId: string
+  customerIds?: string[]
   remark?: string
   plan?: PlanLine[]
 }) {
@@ -1339,6 +1408,7 @@ export function createOrder(input: {
     no: `FH${ymd}-${String(state.seq).padStart(3, '0')}`,
     destination: input.destination.trim() || '未填收货地',
     customerId: input.customerId,
+    customerIds: input.customerIds && input.customerIds.length > 0 ? input.customerIds : undefined,
     remark: input.remark ?? '',
     createdAt: Date.now(),
     status: 'draft',
@@ -1599,6 +1669,37 @@ export function skusOfCustomer(db: DB, customerId: string) {
 
 export function customerById(db: DB, id: string) {
   return db.customers.find((c) => c.id === id)
+}
+
+/** 一趟车的收货方 id 列表（兼容老单：没有 customerIds 就退回单个 customerId） */
+export function orderCustomerIds(order: Pick<Order, 'customerId' | 'customerIds'>): string[] {
+  if (order.customerIds && order.customerIds.length > 0) return order.customerIds
+  return order.customerId ? [order.customerId] : []
+}
+
+/** 一趟车的收货方对象列表（按建档顺序） */
+export function orderCustomers(db: DB, order: Pick<Order, 'customerId' | 'customerIds'>): Customer[] {
+  const ids = orderCustomerIds(order)
+  const set = new Set(ids)
+  return db.customers.filter((c) => set.has(c.id))
+}
+
+/** 多个收货方名，逗号连接；空则给个兜底 */
+export function orderCustomerNames(db: DB, order: Pick<Order, 'customerId' | 'customerIds'>): string {
+  const names = orderCustomers(db, order).map((c) => c.name)
+  return names.length > 0 ? names.join('、') : '—'
+}
+
+/** 多个收货方的品项（去重，按客户建档顺序 + 品项顺序） */
+export function skusOfCustomers(db: DB, customerIds: string[]): Sku[] {
+  const set = new Set(customerIds)
+  if (set.size === 0) return []
+  const ordered = db.customers.filter((c) => set.has(c.id)).map((c) => c.id)
+  return db.skus.filter((s) => set.has(s.customerId)).sort((a, b) => {
+    const ai = ordered.indexOf(a.customerId)
+    const bi = ordered.indexOf(b.customerId)
+    return ai - bi
+  })
 }
 
 type Projection = { bySku: Map<string, number>; byBatch: Map<string, number> }
