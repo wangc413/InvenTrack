@@ -340,6 +340,7 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     if (!dest) return toast('先填收货地')
     if (customerIds.length === 0) return toast('先选收货方')
     const filled = planRows.filter((r) => r.skuId || r.prodDate || r.boxes)
+    if (filled.length === 0) return toast('还没选品：在要货计划里选好品、日期和箱数')
     if (filled.some((r) => !r.skuId || !r.prodDate || !(Number(r.boxes) > 0)))
       return toast('要货计划有没填全的行：品、日期、箱数都要填')
     // 箱数不能超过这个品这个日期的库存
@@ -359,6 +360,12 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     })
     onCreated(id)
   }
+
+  /** 计划是否已填全（品 + 日期 + 箱数都齐）：底部按钮据此亮起/置灰 */
+  const planReady = useMemo(() => {
+    const filled = planRows.filter((r) => r.skuId || r.prodDate || r.boxes)
+    return filled.length > 0 && filled.every((r) => r.skuId && r.prodDate && Number(r.boxes) > 0)
+  }, [planRows])
 
   return (
     <>
@@ -438,9 +445,9 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
         <button
           className="btn primary"
           onClick={create}
-          disabled={!destination.trim() || customerIds.length === 0}
+          disabled={!destination.trim() || customerIds.length === 0 || !planReady}
         >
-          创建并开始装板
+          {planReady ? '创建并开始装板' : customerIds.length === 0 ? '先选收货方' : '先选品和箱数'}
         </button>
       </div>
     </>
@@ -925,7 +932,7 @@ function overText(over: { x: number; z: number }) {
 
       <div className="dock">
         <button className="btn primary" onClick={putOn} disabled={!sku || boxes <= 0 || over > 0 || overPlan}>
-          {editing ? `保存 ${palletLabel}` : `${nextLabel} 开始装车 · 下一板`}
+          {editing ? `保存 ${palletLabel}` : `${palletLabel} 开始装车 · 下一板`}
         </button>
       </div>
     </>
