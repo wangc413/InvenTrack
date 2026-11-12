@@ -302,7 +302,13 @@ function rememberDestination(d: string) {
   }
 }
 
-function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
+function NewOrderForm({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void
+  onCreated: (id: string, scheduled: boolean) => void
+}) {
   const db = useDB()
 
   /** 最近用过的收货地：本地记忆 + 历史车次，点一下直接填 */
@@ -335,7 +341,7 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     })
   }
 
-  const create = () => {
+  const create = (scheduled: boolean) => {
     const dest = destination.trim()
     if (!dest) return toast('先填收货地')
     if (customerIds.length === 0) return toast('先选收货方')
@@ -357,8 +363,9 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
       customerId: customerIds[0],
       customerIds,
       plan: rowsToLines(filled),
+      scheduled,
     })
-    onCreated(id)
+    onCreated(id, scheduled)
   }
 
   /** 计划是否已填全（品 + 日期 + 箱数都齐）：底部按钮据此亮起/置灰 */
@@ -443,8 +450,15 @@ function NewOrderForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
 
       <div className="dock">
         <button
+          className="btn"
+          onClick={() => create(true)}
+          disabled={!destination.trim() || customerIds.length === 0 || !planReady}
+        >
+          保存为预约计划
+        </button>
+        <button
           className="btn primary"
-          onClick={create}
+          onClick={() => create(false)}
           disabled={!destination.trim() || customerIds.length === 0 || !planReady}
         >
           {planReady ? '创建并开始装板' : customerIds.length === 0 ? '先选收货方' : '先选品和箱数'}
@@ -890,7 +904,16 @@ function overText(over: { x: number; z: number }) {
               <div className="hud-steps">
                 <div className="step-chip">
                   <span className="lab">层数</span>
-                  <Stepper value={layers} min={1} max={24} onChange={setLayers} />
+                  <Stepper
+                    value={layers}
+                    min={0}
+                    max={24}
+                    onChange={(v) => {
+                      // 从 0 层点「+」加一层时，顶层直接码满
+                      if (layers === 0 && v === 1) setTopCount(perLayer)
+                      setLayers(v)
+                    }}
+                  />
                 </div>
                 <div className="step-chip">
                   <span className="lab">顶层</span>
@@ -898,7 +921,11 @@ function overText(over: { x: number; z: number }) {
                     value={top}
                     min={0}
                     max={perLayer}
-                    onChange={setTopCount}
+                    onChange={(v) => {
+                      // 顶层从 0 加 1 时，层数也跟着从 0 变 1
+                      if (layers === 0 && v > 0) setLayers(1)
+                      setTopCount(v)
+                    }}
                     onMinus={() => {
                       if (layers > 1) {
                         setLayers(layers - 1)
@@ -918,7 +945,7 @@ function overText(over: { x: number; z: number }) {
                   type="button"
                   className="hud-clear"
                   onClick={() => {
-                    setLayers(1)
+                    setLayers(0)
                     setTopCount(0)
                   }}
                 >
@@ -1065,7 +1092,15 @@ export function Viewer3D({
 
 export default function Load() {
   const db = useDB()
-  const draft = useMemo(() => db.orders.find((o) => o.status === 'draft') ?? null, [db.orders])
+  /** 所有还没发车的单（含正在装的和预约计划卡片） */
+  const drafts = useMemo(() => db.orders.filter((o) => o.status === 'draft'), [db.orders])
+  /** 当前选中在操作/查看哪一车；null = 停在装车主列表（新建车次 + 预约卡片） */
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null)
+
+  const draft = useMemo(
+    () => drafts.find((o) => o.id === activeOrderId) ?? null,
+    [drafts, activeOrderId],
+  )
 
   const [creating, setCreating] = useState(false)
   /** 非空表示正在装板；editId 有值是改已有的板，没有就是在装新的一块 */
@@ -1081,7 +1116,7 @@ export default function Load() {
 
   const confirmShip = () => {
     // 从最新 state 重取草稿：刚 addPallet 装上的板可能还没反映到闭包里的 draft
-    const latest = getState().orders.find((o) => o.status === 'draft') ?? draft
+    const latest = getState().orders.find((o) => o.id === draft?.id) ?? draft
     if (!latest) return
     if (latest.pallets.length === 0) return toast('车上还没有货')
     const short = shortages(db, latest)
@@ -1126,10 +1161,16 @@ export default function Load() {
     return (
       <NewOrderForm
         onCancel={() => setCreating(false)}
-        onCreated={() => {
+        onCreated={(id, scheduled) => {
           setCreating(false)
-          // 建好直接进 3D 装板，不用再点一次
-          setPacking({})
+          if (scheduled) {
+            // 预约计划：不装板，回装车列表看卡片
+            setActiveOrderId(null)
+          } else {
+            // 临时来车：直接进这车的装板工作台
+            setActiveOrderId(id)
+            setPacking({})
+          }
         }}
       />
     )
@@ -1150,14 +1191,18 @@ export default function Load() {
     return <PlanEditPage order={draft} onCancel={() => setPlanEditing(false)} onSaved={() => setPlanEditing(false)} />
   }
 
+  // 装车主列表：新建车次卡片 + 预约/在装卡片列表
   if (!draft) {
     return (
       <>
-        <div className="page">
+        <div className="page with-dock">
           <header className="topbar">
             <h1>装车</h1>
-            <p className="sub">一板一种货，装完看 3D</p>
+            <p className="sub">
+              {drafts.length > 0 ? `${drafts.length} 趟待装` : '一板一种货，装完看 3D'}
+            </p>
           </header>
+
           <div className="card card-pad">
             <div className="empty-state">
               <div className="es-icon">
@@ -1174,7 +1219,62 @@ export default function Load() {
               </button>
             </div>
           </div>
+
+          {drafts.length > 0 && (
+            <>
+              <div className="section-head">
+                <span>预约 / 待装 {drafts.length} 趟</span>
+              </div>
+
+              {drafts.map((o) => {
+                const s = summarize(db, o)
+                const names = orderCustomerNames(db, o)
+                const planTotal = o.plan?.reduce((n, l) => n + l.boxes, 0) ?? 0
+                const started = o.pallets.length > 0
+                return (
+                  <button
+                    key={o.id}
+                    className="card card-pad rec-card"
+                    onClick={() => setActiveOrderId(o.id)}
+                  >
+                    <div className="rec-head">
+                      <span className="rec-dest">{o.destination}</span>
+                      {!started && <span className="rec-badge">预约</span>}
+                    </div>
+                    <div className="rec-meta">
+                      <span className="chip-mini">{names}</span>
+                      {started ? (
+                        <span>已装 {s.totalBoxes} 箱</span>
+                      ) : (
+                        <span>{planTotal > 0 ? `计划 ${planTotal} 箱` : '无计划'}</span>
+                      )}
+                    </div>
+                    {o.plan && o.plan.length > 0 && (
+                      <div className="rec-lines">
+                        {o.plan.slice(0, 3).map((l) => {
+                          const sku = db.skus.find((x) => x.id === l.skuId)
+                          return (
+                            <span key={l.id}>
+                              {sku ? nickOf(sku) : '品项已删除'}
+                              <em>{l.boxes} 箱</em>
+                            </span>
+                          )
+                        })}
+                        {o.plan.length > 3 && <span className="more">+{o.plan.length - 3}</span>}
+                      </div>
+                    )}
+                    <div className="rec-foot">
+                      {started ? `继续装板 · 还差 ${Math.max(0, planTotal - s.totalBoxes)} 箱` : '点击开始装板'}
+                    </div>
+                  </button>
+                )
+              })}
+            </>
+          )}
+
+          <div style={{ height: 12 }} />
         </div>
+
         <Viewer3D
           open={viewerOpen}
           order={shippedPreview}
@@ -1194,6 +1294,14 @@ export default function Load() {
     <>
       <div className="page with-dock">
         <header className="topbar">
+          <button
+            className="icon-btn"
+            aria-label="返回装车列表"
+            title="返回装车列表"
+            onClick={() => setActiveOrderId(null)}
+          >
+            <Icon name="back" size={22} />
+          </button>
           <h1>{draft.destination}</h1>
           <p className="sub">
             {customerNames} · {draft.no}
@@ -1335,7 +1443,16 @@ export default function Load() {
         </button>
       </div>
 
-      <Viewer3D open={viewerOpen} order={draft} onClose={() => setViewerOpen(false)} />
+      <Viewer3D
+        open={viewerOpen}
+        order={shippedPreview ?? draft}
+        onClose={() => {
+          setViewerOpen(false)
+          setShippedPreview(null)
+          // 发完车后回到装车列表，让用户挑下一趟
+          setActiveOrderId(null)
+        }}
+      />
     </>
   )
 }

@@ -113,6 +113,8 @@ export type Order = {
   pallets: Pallet[]
   /** 要货计划；老车次没这个字段就是「没定计划」，行为跟以前一样 */
   plan?: PlanLine[]
+  /** 预约装车计划：提前填好收货地/收货方/品/箱数，暂不装板，等正式装车再点卡片开始 */
+  scheduled?: boolean
 }
 
 export type Truck = {
@@ -1400,6 +1402,7 @@ export function createOrder(input: {
   customerIds?: string[]
   remark?: string
   plan?: PlanLine[]
+  scheduled?: boolean
 }) {
   const d = new Date()
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
@@ -1414,6 +1417,7 @@ export function createOrder(input: {
     status: 'draft',
     pallets: [],
     plan: normalizePlan(input.plan),
+    scheduled: input.scheduled ?? false,
   }
   commit({ ...state, orders: [order, ...state.orders], seq: state.seq + 1 })
   return order.id

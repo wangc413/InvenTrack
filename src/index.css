@@ -1570,6 +1570,8 @@ textarea.input {
 }
 
 .rec-dest {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 16px;
   font-weight: 500;
   letter-spacing: -0.3px;
@@ -1630,6 +1632,26 @@ textarea.input {
 
 .rec-lines .more {
   color: var(--sub);
+}
+
+.rec-foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--sub);
+  font-weight: 500;
+}
+
+.rec-badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .notice-inline {
